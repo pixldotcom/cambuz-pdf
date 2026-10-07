@@ -1,0 +1,22 @@
+{
+  "name": "cambuz-pdf",
+  "version": "1.0.0",
+  "description": "Cambuz PDF Reader — A lightweight, fast PDF reader",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "serve": "node server.js",
+    "build": "echo 'Build requires Electron on target machine'",
+    "samples": "node scripts/create-samples.js"
+  },
+  "author": "Cambuz",
+  "license": "MIT",
+  "dependencies": {
+    "pdfjs-dist": "^4.0.379",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "pdf-lib": "^1.17.1"
+  }
+}

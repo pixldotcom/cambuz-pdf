@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cambuz PDF Reader</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Toolbar -->
+    <header id="toolbar">
+      <div class="toolbar-left">
+        <button id="btn-open" class="toolbar-btn" title="Open PDF (Ctrl+O)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Open</span>
+        </button>
+        <button id="btn-close" class="toolbar-btn" title="Close PDF (Ctrl+W)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+          <span>Close</span>
+        </button>
+        <div class="toolbar-separator"></div>
+        <button id="btn-prev" class="toolbar-btn" title="Previous Page (PageUp)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <div class="page-nav">
+          <input id="page-input" type="number" min="1" value="1" disabled>
+          <span id="page-separator">/</span>
+          <span id="page-total">0</span>
+        </div>
+        <button id="btn-next" class="toolbar-btn" title="Next Page (PageDown)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="toolbar-center">
+        <span id="doc-title" class="doc-title">Cambuz PDF Reader</span>
+      </div>
+
+      <div class="toolbar-right">
+        <button id="btn-zoom-out" class="toolbar-btn" title="Zoom Out (Ctrl+-)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        </button>
+        <span id="zoom-level" class="zoom-level">100%</span>
+        <button id="btn-zoom-in" class="toolbar-btn" title="Zoom In (Ctrl+=)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        </button>
+        <div class="toolbar-separator"></div>
+        <button id="btn-fit-page" class="toolbar-btn" title="Fit Page (Ctrl+0)" disabled>
+          <span>Fit Page</span>
+        </button>
+        <button id="btn-fit-width" class="toolbar-btn" title="Fit Width (Ctrl+Shift+0)" disabled>
+          <span>Fit Width</span>
+        </button>
+        <div class="toolbar-separator"></div>
+        <button id="btn-theme" class="toolbar-btn" title="Toggle Theme">
+          <svg id="theme-icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          <svg id="theme-icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main id="main-content">
+      <!-- Welcome Screen -->
+      <div id="welcome-screen">
+        <div class="welcome-inner">
+          <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="welcome-icon">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+          <h1>Cambuz PDF Reader</h1>
+          <p>Open a PDF to get started</p>
+          <button id="btn-welcome-open" class="btn-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            Open PDF
+          </button>
+          <button id="btn-sample" class="btn-secondary">
+            Try Sample PDF
+          </button>
+          <p class="welcome-hint">or drag and drop a PDF file here</p>
+        </div>
+      </div>
+
+      <!-- PDF Viewer (hidden until PDF is loaded) -->
+      <div id="pdf-viewer" style="display:none">
+        <div id="pdf-container">
+          <canvas id="pdf-canvas"></canvas>
+        </div>
+      </div>
+
+      <!-- Drop Overlay -->
+      <div id="drop-overlay" style="display:none">
+        <div class="drop-inner">
+          <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <p>Drop PDF here</p>
+        </div>
+      </div>
+
+      <!-- Error Display -->
+      <div id="error-display" style="display:none">
+        <div class="error-inner">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>
+          <p id="error-message">An error occurred</p>
+          <button id="btn-error-dismiss" class="btn-primary">OK</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Status Bar -->
+    <footer id="status-bar">
+      <span id="status-text">Ready</span>
+      <span id="status-file"></span>
+    </footer>
+  </div>
+
+  <!-- PDF.js library — paths work for both Express and Electron -->
+  <script type="module">
+    import { initApp } from './renderer.js';
+    initApp();
+  </script>
+</body>
+</html>
