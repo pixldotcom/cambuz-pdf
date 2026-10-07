@@ -10,6 +10,163 @@
 
 ---
 
+## Phase 1 — Implementation Status
+
+### Phase 1 Status: `PHASE 1 COMPLETE`
+
+### Features Implemented
+
+| Requirement | Status |
+|---|---|
+| Launch application | ✅ Implemented |
+| Open PDF through file picker | ✅ Implemented |
+| Open PDF by drag-and-drop | ✅ Implemented |
+| Render PDF pages | ✅ Implemented |
+| Previous/next page | ✅ Implemented |
+| Page number navigation | ✅ Implemented |
+| Zoom in/out | ✅ Implemented |
+| Fit page | ✅ Implemented |
+| Fit width | ✅ Implemented |
+| Scroll document | ✅ Implemented |
+| Page count | ✅ Implemented |
+| Basic toolbar | ✅ Implemented |
+| Window resizing | ✅ Implemented |
+| Close/open another PDF | ✅ Implemented |
+| Basic error handling | ✅ Implemented |
+| Dark/light UI | ✅ Implemented |
+| Clean, minimal interface | ✅ Implemented |
+
+### Technology
+
+| Component | Choice |
+|---|---|
+| **Framework** | Electron (desktop) + Express (web preview) |
+| **Language** | JavaScript (ES modules) |
+| **PDF Engine** | Mozilla PDF.js (pdfjs-dist v4) |
+| **Styling** | Custom CSS with CSS variables (dark/light themes) |
+| **Architecture** | Modular — rendering, navigation, and UI separated |
+
+### Dependencies
+
+| Package | Version | Purpose |
+|---|---|---|
+| `pdfjs-dist` | ^4.0.379 | PDF rendering engine |
+| `express` | ^4.18.2 | Web server for preview mode |
+| `electron` | ^28.0.0 | Desktop application shell (dev) |
+| `pdf-lib` | ^1.17.1 | Sample PDF generation (dev) |
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/pixldotcom/cambuz-pdf.git
+cd cambuz-pdf
+
+# Install dependencies
+npm install
+
+# Run as web application (for preview/testing)
+npm run serve
+
+# Run as desktop application (requires Electron)
+npm start
+
+# Generate sample PDFs
+npm run samples
+```
+
+### Development Commands
+
+| Command | Description |
+|---|---|
+| `npm run serve` | Start web server on port 3000 |
+| `npm start` | Launch Electron desktop app |
+| `npm run samples` | Generate sample PDF files |
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+O` | Open PDF |
+| `Ctrl+W` | Close PDF |
+| `PageUp` / `PageDown` | Previous / Next page |
+| `Home` / `End` | First / Last page |
+| `Ctrl+Plus` / `Ctrl+Minus` | Zoom in / Zoom out |
+| `Ctrl+0` | Fit page |
+| `Ctrl+Shift+0` | Fit width |
+| `Ctrl+Shift+D` | Toggle dark/light theme |
+
+### Project Structure
+
+```
+cambuz-pdf/
+├── main.js              # Electron main process
+├── preload.js           # Electron preload script (IPC bridge)
+├── server.js            # Express web server for preview
+├── package.json         # Project configuration
+├── src/
+│   ├── index.html       # Main application HTML
+│   ├── renderer.js      # PDF rendering and UI logic
+│   └── styles.css       # Application styles (dark/light)
+├── scripts/
+│   └── create-samples.js  # Sample PDF generator
+├── samples/             # Sample PDF files for testing
+│   ├── welcome.pdf      # 5-page welcome document
+│   └── cambuz-demo.pdf  # 10-page comprehensive demo
+├── assets/              # Application assets
+└── README.md            # This file
+```
+
+### Architecture
+
+```
+Cambuz PDF Reader
+       |
++------+------+------+
+|      |      |      |
+| PDF  | UI   | File |
+| Render| Layer| I/O  |
+|      |      |      |
++------+------+------+
+       |
+  PDF.js Engine
+```
+
+- **Rendering**: PDF.js renders pages to HTML5 Canvas with high-DPI support
+- **Navigation**: Page state management with prev/next/jump-to-page
+- **Zoom**: Manual zoom, fit-to-page, fit-to-width with auto-refit on resize
+- **File I/O**: File picker (Electron dialog or web input) + drag-and-drop
+- **Theme**: CSS variables for instant dark/light switching
+
+### Known Limitations
+
+- **Electron binary**: Cannot be installed in all environments; web preview mode works everywhere
+- **Single page view**: Currently renders one page at a time (continuous scroll not yet implemented)
+- **No text selection**: Phase 1 renders to canvas only; text selection/copy comes in Phase 2
+- **No search**: Text search is a Phase 2 feature
+- **No thumbnails**: Page thumbnails are a Phase 2 feature
+- **No bookmarks**: Document outline/bookmarks are a Phase 2 feature
+- **No printing**: Print workflow is a Phase 3 feature
+- **No password support**: Encrypted PDFs are a Phase 5 feature
+
+### Tests Performed
+
+1. **Page load**: Application loads correctly in web browser
+2. **Resource serving**: All static resources (HTML, CSS, JS, PDF.js, samples) serve with correct MIME types
+3. **Sample PDF validity**: Both sample PDFs validate correctly with pdf-lib
+4. **PDF.js availability**: pdf.mjs and pdf.worker.mjs are accessible and correctly typed as JavaScript
+5. **Navigation logic**: Page navigation bounds checking (min 1, max totalPages)
+6. **Zoom logic**: Zoom scale limits (0.25x to 5.0x)
+7. **Fit calculations**: Fit-to-page and fit-to-width algorithms use correct viewport math
+8. **Theme switching**: CSS variables properly swap between dark and light palettes
+9. **Error handling**: Error display shown for invalid files, dismissed by user action
+10. **Drag and drop**: Drop overlay appears on drag enter, disappears on drag leave/drop
+
+---
+
+
+---
+
 ## 1. Product Vision
 
 Cambuz PDF Reader is intended to be a deliberately focused PDF application.
