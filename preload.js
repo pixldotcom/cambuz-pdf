@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('cambuzAPI', {
   openFile: () => ipcRenderer.invoke('dialog-open-file'),
+  readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
   onMenuOpenFile: (callback) => ipcRenderer.on('menu-open-file', callback),
   onMenuCloseFile: (callback) => ipcRenderer.on('menu-close-file', callback),
   onMenuZoomIn: (callback) => ipcRenderer.on('menu-zoom-in', callback),
@@ -11,4 +12,11 @@ contextBridge.exposeInMainWorld('cambuzAPI', {
   onMenuPrevPage: (callback) => ipcRenderer.on('menu-prev-page', callback),
   onMenuNextPage: (callback) => ipcRenderer.on('menu-next-page', callback),
   onMenuToggleTheme: (callback) => ipcRenderer.on('menu-toggle-theme', callback),
+  onMenuFind: (callback) => ipcRenderer.on('menu-find', callback),
+  onMenuSelectAll: (callback) => ipcRenderer.on('menu-select-all', callback),
+  onMenuRotateCW: (callback) => ipcRenderer.on('menu-rotate-cw', callback),
+  onMenuRotateCCW: (callback) => ipcRenderer.on('menu-rotate-ccw', callback),
+  onMenuFullscreen: (callback) => ipcRenderer.on('menu-fullscreen', callback),
+  onMenuSidebar: (callback) => ipcRenderer.on('menu-sidebar', callback),
+  onMenuShortcuts: (callback) => ipcRenderer.on('menu-shortcuts', callback),
 });
