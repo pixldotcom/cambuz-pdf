@@ -43,13 +43,14 @@ globalThis.localStorage = dom.window.localStorage;
 
 const { SearchController } = await import('../src/search.js');
 const { SidebarController } = await import('../src/sidebar.js');
+const { PrintController } = await import('../src/print-ui.js');
 const Recents = await import('../src/recents.js');
 
 // ---------------------------------------------------------------------------
 section('D1. index.html element wiring');
 
 const REQUIRED_IDS = [
-  'toolbar', 'btn-sidebar', 'btn-open', 'btn-close', 'btn-prev', 'btn-next',
+  'toolbar', 'btn-sidebar', 'btn-open', 'btn-close', 'btn-print', 'btn-prev', 'btn-next',
   'page-input', 'page-total', 'doc-title', 'btn-search', 'btn-zoom-out',
   'zoom-level', 'btn-zoom-in', 'btn-fit-page', 'btn-fit-width',
   'btn-rotate-ccw', 'btn-rotate-cw', 'btn-fullscreen', 'btn-theme', 'btn-help',
@@ -80,6 +81,56 @@ assert(
   'shortcuts dialog documents keys',
   `${document.querySelectorAll('.shortcuts-table kbd').length} kbd tags`
 );
+
+section('D1b. Phase 3 print dialog wiring');
+const PRINT_IDS = [
+  'print-dialog', 'print-document-label', 'btn-print-close', 'btn-print-cancel',
+  'btn-print-current', 'btn-print-submit', 'btn-print-download', 'print-preset',
+  'print-current-page-label', 'print-page-range', 'print-range-error',
+  'print-printer', 'btn-refresh-printers', 'print-copies', 'print-paper',
+  'print-orientation', 'print-pages-per-sheet', 'print-scaling',
+  'print-custom-scale', 'print-margins', 'print-custom-margin',
+  'print-ink-saver', 'print-settings-error', 'print-preview-summary',
+  'btn-print-preview-prev', 'btn-print-preview-next', 'print-preview-page',
+  'print-preview-total', 'print-preview-stage', 'print-preview-placeholder',
+  'print-preview-canvas', 'print-preview-caption', 'print-status',
+];
+assert(
+  PRINT_IDS.every((id) => document.getElementById(id)),
+  `all ${PRINT_IDS.length} print controls and preview elements are present`
+);
+assert(
+  document.getElementById('print-dialog').getAttribute('aria-modal') === 'true',
+  'print preview is exposed as an accessible modal dialog'
+);
+assert(
+  [...document.querySelectorAll('#print-preset option')].some((option) => option.value === 'ink-saver'),
+  'Ink Saver preset is available'
+);
+const printController = new PrintController({
+  pdfjsLib: {},
+  standardFontDataUrl: '',
+  getDoc: () => null,
+  getSourceBytes: () => null,
+  getCurrentPage: () => 2,
+  getTotalPages: () => 5,
+  getDocumentName: () => 'test.pdf',
+  getDocumentGeneration: () => 1,
+  onStatus: () => {},
+});
+assert(!printController.isOpen, 'print controller starts closed');
+const validPrintForm = printController.validateSettings(printController.readSettings());
+assert(validPrintForm.valid && validPrintForm.summary.selectedCount === 5, 'default print form validates all pages');
+const invalidRangeForm = printController.validateSettings({ ...printController.readSettings(), pageMode: 'range', pageRange: '0' });
+assert(!invalidRangeForm.valid && document.getElementById('print-range-error').textContent.includes('between 1 and 5'), 'print dialog shows invalid page-range feedback');
+printController.applySettingsToForm({ ...printController.readSettings(), pageMode: 'all', pageRange: '' });
+printController.applyPreset('two-up');
+assert(
+  printController.readSettings().pagesPerSheet === '2' && printController.readSettings().orientation === 'landscape',
+  '2-up preset applies landscape layout settings'
+);
+printController.applyPreset('ink-saver');
+assert(printController.readSettings().inkSaver, 'Ink Saver preset enables grayscale output');
 
 // ---------------------------------------------------------------------------
 section('D2. Search highlighting (real SearchController + DOM)');
@@ -369,6 +420,7 @@ try {
 } catch (err) {
   fail('renderer imports cleanly', err.message);
 }
+await printController.destroyPreview();
 
 // ---------------------------------------------------------------------------
 console.log(`\n==============================`);
