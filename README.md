@@ -2,7 +2,7 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 2 — Reading Experience  
+**Project status:** Phase 3 — Printing implemented; physical-printer verification pending<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
@@ -10,13 +10,56 @@
 
 ---
 
+## Phase 3 — Implementation Status
+
+### Phase 3 Status: `PRINT WORKFLOW IMPLEMENTED — HARDWARE TEST PENDING`
+
+Phase 1 and Phase 2 reading features are preserved. Phase 3 adds a print
+workflow that composes the chosen pages into a print-ready PDF before output.
+The preview is rendered from that exact PDF, so its page selection, paper
+size, margins, scaling, orientation and N-up layout match the file sent to
+Electron's native print API.
+
+| Requirement | Implementation |
+|---|---|
+| Print current page / all pages / selected pages | ✅ Radio choices and validated page lists/ranges |
+| Page range validation | ✅ Bounds, syntax, descending ranges and duplicates rejected |
+| Printer selection | ✅ Electron printer list, default printer, refresh and system-dialog fallback |
+| Copies | ✅ 1–99 copies; passed to native printer or browser dialog |
+| Portrait / landscape | ✅ Output paper media box and native printer settings aligned |
+| Paper sizes | ✅ A4, A3, A5, Letter, Legal and Tabloid |
+| Fit / actual / custom scaling | ✅ Applied in the generated print PDF |
+| Margins | ✅ None, narrow, normal, wide and custom (0–50 mm) |
+| Multiple pages per sheet | ✅ 1, 2 or 4; clipped to each sheet cell |
+| Print preview | ✅ PDF.js preview of the composed output PDF |
+| Ink Saver preset | ✅ Grayscale raster output, capped at 200 dpi / 18 megapixels per page |
+| Native Windows printing | ✅ Electron printer enumeration and `webContents.print` route implemented |
+| Browser print fallback | ✅ Opens the same print-ready PDF in the system PDF/print flow |
+| Actual physical printer test | ⏳ Not available in this sandbox; verify on Windows with a configured printer |
+
+Normal print jobs preserve the source PDF page content as vector content.
+Ink Saver intentionally rasterizes each page in grayscale at print resolution.
+The print-ready PDF can also be downloaded for external printer testing.
+
+### Phase 3 verification status
+
+Automated tests cover page-range validation, paper dimensions, orientation,
+1/2/4-up sheet counts and geometry, margins, scale modes, output PDF page
+counts and media boxes, text preservation (including Hindi and Punjabi), PDF
+page rotation, and Ink Saver output. The sandbox has no installed Electron
+binary/display or physical printer, so the Windows native dialog and hardware
+output were **not** exercised; this is not represented as a printer test.
+
+---
+
 ## Phase 2 — Implementation Status
 
 ### Phase 2 Status: `PHASE 2 COMPLETE`
 
-Phase 1 functionality is fully preserved. Phase 2 adds the reading experience
-on top of it, with no Phase 3+ features (no printing, merging, splitting,
-forms, OCR, AI, cloud, accounts or telemetry).
+Phase 1 functionality is fully preserved. This section records the Phase 2
+reading-experience milestone; printing was intentionally outside that
+milestone and is implemented in the Phase 3 section above. PDF utilities,
+forms, OCR, AI, cloud, accounts and telemetry remain outside scope.
 
 ### Features Implemented
 
@@ -52,15 +95,16 @@ forms, OCR, AI, cloud, accounts or telemetry).
 
 ### Dependencies
 
-Phase 2 adds dev-only dependencies used to generate and verify Unicode
-fixtures. The runtime still needs only `pdfjs-dist` + `express`.
+Phase 2 added development dependencies for Unicode fixtures. Phase 3 adds
+`pdf-lib` as a runtime dependency to compose the vector-preserving print PDF;
+the web preview also uses `express`.
 
 | Package | Version | Purpose | Runtime? |
 |---|---|---|---|
 | `pdfjs-dist` | ^4.0.379 | PDF rendering engine | Yes |
 | `express` | ^4.18.2 | Web server for preview mode | Yes (preview) |
 | `electron` | ^28.0.0 | Desktop application shell (dev) | App shell |
-| `pdf-lib` | ^1.17.1 | Basic sample PDF generation (dev) | No |
+| `pdf-lib` | ^1.17.1 | Vector-preserving print PDF composition (also used by sample generator) | Yes |
 | `@pdf-lib/fontkit` | ^1.1.1 | Custom-font support experiments (dev) | No |
 | `@expo-google-fonts/noto-sans-devanagari` | ^0.4.1 | Noto Devanagari TTF for samples (dev) | No |
 | `@expo-google-fonts/noto-sans-gurmukhi` | ^0.4.1 | Noto Gurmukhi TTF for samples (dev) | No |
@@ -74,9 +118,11 @@ fixtures. The runtime still needs only `pdfjs-dist` + `express`.
 git clone https://github.com/pixldotcom/cambuz-pdf.git
 cd cambuz-pdf
 
-# Install dependencies (Electron binary download may fail in restricted
-# sandboxes; the web preview works without it)
-npm install --ignore-scripts
+# Install dependencies (the Electron postinstall downloads the desktop runtime)
+npm install
+
+# In a restricted sandbox, npm install --ignore-scripts still enables the
+# web preview and automated tests, but not npm start / native printing.
 
 # Optional: needed only to regenerate the Unicode sample PDFs
 pip install fpdf2 uharfbuzz
@@ -90,7 +136,7 @@ npm start
 # Generate all sample PDFs (basic + Unicode)
 npm run samples
 
-# Run the automated test suites (167 assertions)
+# Run the automated test suites (236 assertions)
 npm test
 ```
 
@@ -103,9 +149,10 @@ npm test
 | `npm run samples` | Generate all sample PDFs (JS + Python) |
 | `npm run samples:js` | Generate basic samples only |
 | `npm run samples:unicode` | Generate Unicode samples only (needs fpdf2) |
-| `npm test` | Run Node + DOM test suites |
+| `npm test` | Run Node, DOM and Phase 3 print suites |
 | `npm run test:node` | Run PDF/extraction/search/outline tests |
 | `npm run test:dom` | Run DOM tests (highlight/outline/recents/wiring) |
+| `npm run test:phase3` | Run print-range, layout, PDF-output and Ink Saver tests |
 
 ### Keyboard Shortcuts
 
@@ -113,6 +160,7 @@ npm test
 |---|---|
 | `Ctrl+O` | Open PDF |
 | `Ctrl+W` | Close PDF (desktop) |
+| `Ctrl+P` | Open print preview |
 | `Ctrl+F` | Search in document |
 | `Enter` / `Shift+Enter` | Next / previous match |
 | `F3` / `Shift+F3` | Next / previous match |
@@ -135,22 +183,26 @@ npm test
 
 ```
 cambuz-pdf/
-├── main.js                  # Electron main process (menus, file IPC)
-├── preload.js               # Electron preload script (IPC bridge)
+├── main.js                  # Electron menus, file IPC, printers and native print
+├── preload.js               # Narrow Electron IPC bridge
 ├── server.js                # Express web server for preview
 ├── package.json             # Project configuration
 ├── src/
-│   ├── index.html           # Main application HTML (toolbar, sidebar, search)
-│   ├── renderer.js          # Loading, rendering, nav, zoom, rotation, events
+│   ├── index.html           # Reader UI and print-preview dialog
+│   ├── renderer.js          # Loading, rendering, navigation and app events
+│   ├── printing.js          # Range validation, sheet layout, print-PDF creation
+│   ├── print-ui.js          # Settings, preview rendering and print actions
+│   ├── print.css            # Print dialog and preview styling
 │   ├── search.js            # Unicode search engine + highlighting
 │   ├── sidebar.js           # Thumbnails + document outline
 │   ├── recents.js           # Recent files + IndexedDB byte cache
-│   └── styles.css           # Application styles (dark/light)
+│   └── styles.css           # Reader styles (dark/light)
 ├── scripts/
 │   ├── create-samples.js    # Basic sample PDFs (pdf-lib)
 │   ├── create-unicode-samples.py  # Hindi/Punjabi/multilingual PDFs (fpdf2)
-│   ├── test-phase2.mjs      # Node test suite (PDF-level)
-│   └── test-phase2-dom.mjs  # DOM test suite (jsdom)
+│   ├── test-phase2.mjs      # Node PDF/extraction/search suite
+│   ├── test-phase2-dom.mjs  # DOM/reader/print wiring suite (jsdom)
+│   └── test-phase3.mjs      # Print composition and validation suite
 ├── samples/                 # Sample PDF files for testing
 │   ├── welcome.pdf          # 5-page welcome document
 │   ├── cambuz-demo.pdf      # 10-page comprehensive demo
@@ -186,6 +238,9 @@ Cambuz PDF Reader
 - **Recents**: metadata in `localStorage`; web mode caches small files in
   `IndexedDB` so reopen works; Electron reopens by native path
 - **Rotation**: 0/90/180/270° applied to canvas, text layer and thumbnails
+- **Printing**: `pdf-lib` composes source pages into physical-size sheets; PDF.js
+  renders those exact sheets for preview; Electron routes the same PDF to the
+  selected native printer, while browser mode opens it in the system PDF/print flow
 
 ### Search Verification (Unicode)
 
@@ -204,27 +259,40 @@ correct shaping (verified by rasterizing pages to PNG).
 
 ### Known Limitations
 
-- **Electron binary**: cannot be installed in restricted environments; the
-  new Electron file-read IPC and menus are code-reviewed but not yet
-  executed in this sandbox — verify on a Windows machine (see manual
-  checklist below)
+- **Native printer verification**: Electron's native route is implemented, but
+  this sandbox has no Electron binary, desktop display or physical printer.
+  Exercise the printer list, native dialog, copies, paper sizes and actual
+  Windows output on a machine with a configured printer before release.
+- **Device printable margins**: the selected margin value defines the printable
+  content box; per-printer non-printable margins are not queried automatically.
+  Printers may clip at their hardware edges when `None` is selected.
+- **Annotations and interactive forms**: vector composition embeds page graphics;
+  annotations and interactive form widgets are not separately flattened into
+  the print job (forms are a later phase).
+- **Ink Saver quality**: Ink Saver rasterizes at up to 200 dpi (with an
+  18-megapixel-per-page safety cap); normal print jobs preserve vector content.
+- **Print preparation memory**: the active source PDF is retained for printing
+  and the composed output is held in memory. Electron rejects a print job above
+  250 MiB; very large documents can require substantial RAM.
+- **Browser printer access**: web mode cannot enumerate native printers; it
+  opens the system PDF/print flow instead. Electron mode provides the printer
+  selector and direct native route.
 - **Sample-generator constraint**: the fpdf2-based generator mis-encodes
   `ToUnicode` for pre-base matras (ि/ਿ) and some ligature+matra sequences,
   so sample content avoids those constructions (every word is
   extraction-verified). This is a fixture limitation, not a reader
   limitation — the reader decodes whatever `ToUnicode`/`ActualText` a PDF
-  provides. Phase 6 will add real-world conjunct-heavy fixtures
+  provides. Phase 6 will add real-world conjunct-heavy fixtures.
 - **Single page view**: one page at a time (continuous scroll still future)
-- **No printing**: Phase 3 feature (explicitly excluded; absence verified)
-- **No page manipulation / forms / passwords**: Phase 4–5 features
+- **No page manipulation / passwords**: Phase 4–5 features
 - **Recent-file cache**: web-mode byte cache capped at 5 files × 60 MiB;
   larger/older files must be reopened manually
 - **Search**: case-insensitive substring search; no regex, no whole-word or
   diacritic-insensitive options yet
 
-### Tests Performed (Automated — 167 assertions, all passing)
+### Tests Performed (Automated — 236 assertions, all passing)
 
-Node suite (`npm run test:node`, 116 assertions):
+Node suite (`npm run test:node`, 123 assertions):
 
 1. All 5 sample PDFs exist and parse with expected page counts
 2. Unicode extraction intact (पंजाब/ਪੰਜਾਬ/Punjab, conjuncts क्ष त्र ज्ञ श्र
@@ -236,45 +304,64 @@ Node suite (`npm run test:node`, 116 assertions):
 6. Outlines present (8/4/4 entries) and every destination resolves to a page
 7. Metadata (title/author) present
 8. Rotation viewport math (90° swaps dimensions, 180° preserves)
-9. Syntax check (`node --check`) on all 10 JS sources
-10. No Phase-3+ leakage (print/merge/split/OCR/telemetry strings absent)
+9. Syntax check (`node --check`) on all application and test JS sources
+10. Phase 3 print IPC/layout hooks present; no Phase-4+ utilities, OCR or telemetry
 11. Recents pure helpers (ids, sizes, relative time)
 
-DOM suite (`npm run test:dom`, 51 assertions, jsdom + real modules):
+DOM suite (`npm run test:dom`, 59 assertions, jsdom + real modules):
 
-1. All 62 required element ids present in `index.html`
-2. Real `SearchController`: highlight marks created for EN/HI/PA queries
+1. Reader controls and accessible print dialog elements present
+2. PrintController defaults, settings validation and 2-up/Ink Saver presets
+3. Real `SearchController`: highlight marks created for EN/HI/PA queries
    with byte-exact text, current-mark tracking, wrap navigation, clear()
-3. Real `SidebarController`: nested outline build, collapse/expand,
+4. Real `SidebarController`: nested outline build, collapse/expand,
    explicit + named destination navigation, external-URL handling, tabs
-4. Real `recents.js`: add/list/update/remove/clear round-trip in
+5. Real `recents.js`: add/list/update/remove/clear round-trip in
    `localStorage`, reopen-last setting
-5. `renderer.js` imports cleanly against the real DOM
+6. `renderer.js` imports cleanly against the real DOM
 
-Server checks (manual, all 200 with correct MIME types): `/`,
-`/src/*`, `pdf.mjs`, `pdf.worker.mjs`, standard fonts, all 5 sample PDFs.
+Print suite (`npm run test:phase3`, 54 assertions):
 
-Render checks: Hindi/Punjabi/mixed pages rasterized to PNG and visually
-verified (correct shaping, conjuncts, matras, bindi/anusvara).
+1. Current/all/range selection; malformed, duplicate and out-of-range pages rejected
+2. A4/Letter dimensions, portrait/landscape, margins, fit/actual/custom scale
+3. 1/2/4 pages per sheet, partial sheets, selected-page order and clipping plan
+4. Composed PDFs reopen in PDF.js with expected page count, media box and page text
+5. Hindi and Punjabi content survives vector composition; page /Rotate is retained
+6. Ink Saver passes grayscale PNG pages into a valid output PDF
 
-### Manual Browser Checklist (for a machine with a display)
+Server checks (curl, HTTP 200 with expected MIME types): `/src/index.html`,
+`/src/print.css`, `/src/print-ui.js`, `/src/printing.js`, `pdf-lib` ESM,
+PDF.js ESM and `samples/welcome.pdf`.
 
-The live preview (`npm run serve` → http://localhost:3000) supports the
-full flow; verify on Windows + Electron before release:
+Native Electron/Windows printer behavior and browser canvas-preview appearance
+still require the manual checklist below; they are not asserted as hardware-tested.
 
-1. Open `samples/multilingual.pdf` via Open button, drag-and-drop and `?pdf=` URL
-2. Sidebar: thumbnails render lazily, click navigates; Bookmarks tab lists
-   8 entries, click jumps to the right page
-3. Search `Punjab`, `पंजाब`, `ਪੰਜਾਬ`: counts read 12, highlights show on
-   every page, Enter/F3 wrap through all matches
-4. Select Hindi/Punjabi text with the mouse, copy, paste into Notepad —
-   glyphs must be byte-identical
-5. `Ctrl+A` selects page text; `R`/`Shift+R` rotate; thumbnails follow
-6. `F11` full screen; `F9` sidebar; `?` shortcuts dialog; theme toggle
-7. Reload: recent files list the document; reopen restores the last page
-8. Close (`Ctrl+W`), open another PDF, invalid-file error path
-9. Electron only: native Open dialog, menus (Find/Rotate/Fullscreen/
-   Sidebar/Shortcuts), reopen-by-path after restart
+### Manual Browser / Windows Checklist
+
+Start the web preview with `npm run serve` (port 3000). The live preview can
+exercise the UI and browser print fallback; Windows + Electron is required to
+verify native printer enumeration and driver output.
+
+1. Open `samples/multilingual.pdf` via Open, drag-and-drop and `?pdf=` URL
+2. Sidebar thumbnails/bookmarks, Unicode search, copy/select-all, rotation,
+   fullscreen, theme and recents still work as before
+3. Press `Ctrl+P`; verify the all-pages preview and output PDF use the same sheet layout
+4. Select Current page, then Selected pages `2-4, 6`; test empty, duplicate,
+   descending and out-of-document ranges are blocked with clear errors
+5. Compare A4 portrait and landscape; also try Letter and Legal
+6. Exercise Fit, Actual Size and a custom scale; use None, Normal and Custom
+   margins and confirm the preview changes accordingly
+7. Use 2-up and 4-up on `samples/cambuz-demo.pdf`; inspect the final partial
+   sheet and page order in preview and downloaded print-ready PDF
+8. Turn on Ink Saver; confirm pages render grayscale, then download/open the
+   prepared PDF and inspect it independently
+9. Electron on Windows: refresh printer list, select the default and another
+   printer, print one copy and multiple copies; verify the driver paper size,
+   orientation, clipping and margins
+10. Also test the native system-dialog fallback with no selected printer and
+    verify cancellation, printer errors and retry behavior
+11. Electron only: native Open dialog, menus (Find/Rotate/Fullscreen/
+    Sidebar/Shortcuts/Print) and reopen-by-path after restart
 
 ---
 
@@ -414,7 +501,8 @@ Cambuz PDF Reader
 - **No search**: Text search is a Phase 2 feature
 - **No thumbnails**: Page thumbnails are a Phase 2 feature
 - **No bookmarks**: Document outline/bookmarks are a Phase 2 feature
-- **No printing**: Print workflow is a Phase 3 feature
+- **At the Phase 1 milestone only**: printing was still a future Phase 3
+  feature; the current workflow is documented at the top of this README
 - **No password support**: Encrypted PDFs are a Phase 5 feature
 
 ### Tests Performed

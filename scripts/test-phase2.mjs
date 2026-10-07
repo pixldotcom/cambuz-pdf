@@ -10,7 +10,7 @@
 //  6. Metadata present
 //  7. Rotation viewport math
 //  8. JS syntax of all app sources
-//  9. No Phase-3+ feature leakage (print/merge/split/OCR)
+//  9. No Phase-4+ feature leakage (printing is covered by Phase 3 tests)
 // 10. Recents pure helpers
 //
 // Browser-only behavior (canvas rendering, text-layer DOM, IndexedDB,
@@ -401,12 +401,15 @@ for (const f of [
   'src/search.js',
   'src/sidebar.js',
   'src/recents.js',
+  'src/printing.js',
+  'src/print-ui.js',
   'main.js',
   'preload.js',
   'server.js',
   'scripts/create-samples.js',
   'scripts/test-phase2.mjs',
   'scripts/test-phase2-dom.mjs',
+  'scripts/test-phase3.mjs',
 ]) {
   try {
     execFileSync(process.execPath, ['--check', path.join(ROOT, f)], { stdio: 'pipe' });
@@ -417,15 +420,17 @@ for (const f of [
 }
 
 // ---------------------------------------------------------------------------
-section('9. No Phase-3+ feature leakage');
+section('9. No Phase-4+ feature leakage');
 
 {
-  const src = ['src/renderer.js', 'src/search.js', 'src/sidebar.js', 'src/recents.js', 'main.js']
+  const src = ['src/renderer.js', 'src/search.js', 'src/sidebar.js', 'src/recents.js', 'src/printing.js', 'src/print-ui.js', 'main.js']
     .map((f) => readFileSync(path.join(ROOT, f), 'utf8'))
     .join('\n');
+  const required = ['print-pdf', 'list-printers', 'webContents.print', 'buildPrintPdf'];
+  for (const feature of required) {
+    assert(src.includes(feature), `Phase 3 print integration includes ${feature}`);
+  }
   const banned = [
-    'window.print',
-    'webContents.print',
     'mergePDF',
     'splitPDF',
     'extractPages',
@@ -436,13 +441,13 @@ section('9. No Phase-3+ feature leakage');
     'analytics',
   ];
   let clean = true;
-  for (const b of banned) {
-    if (src.includes(b)) {
+  for (const feature of banned) {
+    if (src.includes(feature)) {
       clean = false;
-      fail(`no leakage: ${b}`, 'found in Phase 2 sources');
+      fail(`no Phase-4+ leakage: ${feature}`, 'found in current application sources');
     }
   }
-  if (clean) pass('no print/merge/split/OCR/telemetry code in sources');
+  if (clean) pass('no PDF utilities/OCR/telemetry code in current sources');
 }
 
 // ---------------------------------------------------------------------------

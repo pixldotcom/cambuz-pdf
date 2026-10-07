@@ -2,7 +2,7 @@
 // Handles PDF loading, rendering (canvas + selectable text layer),
 // navigation, zoom, rotation, search, sidebar, recents and UI events.
 //
-// Phase 1 functionality is preserved; Phase 2 adds the reading experience.
+// Phase 1 and 2 functionality is preserved; Phase 3 adds print preparation and preview.
 
 import { SearchController } from './search.js';
 import { SidebarController } from './sidebar.js';
@@ -21,11 +21,16 @@ import {
   timeAgo,
   formatBytes,
 } from './recents.js';
+import { PrintController } from './print-ui.js';
 
 // PDF.js setup
 const pdfjsLib = await import('../node_modules/pdfjs-dist/build/pdf.mjs');
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   '../node_modules/pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url
+).href;
+const STANDARD_FONT_DATA_URL = new URL(
+  '../node_modules/pdfjs-dist/standard_fonts/',
   import.meta.url
 ).href;
 
@@ -43,9 +48,12 @@ let currentFileName = 'Document';
 let currentFileSize = 0;
 let currentFilePath = null; // Electron native path (null in web mode)
 let currentRecentId = null;
+let originalPdfBytes = null; // stable copy retained for print preparation
+let documentGeneration = 0;
 
 let search = null;
 let sidebar = null;
+let printing = null;
 
 // --- DOM elements ---
 const elements = {
@@ -60,6 +68,7 @@ const elements = {
   errorMessage: document.getElementById('error-message'),
   btnOpen: document.getElementById('btn-open'),
   btnClose: document.getElementById('btn-close'),
+  btnPrint: document.getElementById('btn-print'),
   btnPrev: document.getElementById('btn-prev'),
   btnNext: document.getElementById('btn-next'),
   btnZoomIn: document.getElementById('btn-zoom-in'),
@@ -126,23 +135,20 @@ function updateStatusMeta() {
 async function loadPDF(source, fileName, meta = {}) {
   try {
     let data;
-    let bytesForCache = null;
+    let stableBytes;
 
     if (source instanceof ArrayBuffer) {
       data = source;
-      bytesForCache = source;
+      stableBytes = new Uint8Array(source).slice();
     } else if (ArrayBuffer.isView(source)) {
       data = source;
-      bytesForCache =
-        source.buffer.byteLength === source.byteLength
-          ? source.buffer
-          : source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
+      stableBytes = new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
     } else if (typeof source === 'string') {
       setStatus('Loading document…');
       const response = await fetch(source);
       if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.status}`);
       data = await response.arrayBuffer();
-      bytesForCache = data;
+      stableBytes = new Uint8Array(data).slice();
     } else {
       throw new Error('Invalid PDF source');
     }
@@ -153,7 +159,8 @@ async function loadPDF(source, fileName, meta = {}) {
     });
     const doc = await loadingTask.promise;
 
-    // Swap in the new document.
+    // Swap in the new document only after PDF.js has opened the candidate.
+    await printing?.onDocumentChanged();
     if (pdfDoc) {
       try {
         await pdfDoc.destroy();
@@ -162,9 +169,11 @@ async function loadPDF(source, fileName, meta = {}) {
       }
     }
     pdfDoc = doc;
+    originalPdfBytes = stableBytes;
+    documentGeneration += 1;
     totalPages = pdfDoc.numPages;
     currentFileName = fileName || fileNameFromUrl(typeof source === 'string' ? source : '') || 'Document';
-    currentFileSize = meta.size || (bytesForCache ? bytesForCache.byteLength : 0);
+    currentFileSize = meta.size || stableBytes.byteLength;
     currentFilePath = meta.path || null;
     rotation = 0;
     fitMode = 'width';
@@ -197,8 +206,8 @@ async function loadPDF(source, fileName, meta = {}) {
     updateRecentPages(currentRecentId, totalPages);
 
     // Cache bytes for reopen (web mode only; Electron reopens via path).
-    if (bytesForCache && !currentFilePath) {
-      storeBlob(currentRecentId, bytesForCache.slice(0)).catch(() => {});
+    if (stableBytes && !currentFilePath) {
+      storeBlob(currentRecentId, stableBytes.buffer.slice(0)).catch(() => {});
     }
 
     // Update UI — enable controls.
@@ -207,6 +216,7 @@ async function loadPDF(source, fileName, meta = {}) {
     elements.pageInput.value = currentPage;
     elements.pageInput.disabled = false;
     elements.btnClose.disabled = false;
+    elements.btnPrint.disabled = false;
     elements.btnPrev.disabled = currentPage <= 1;
     elements.btnNext.disabled = currentPage >= totalPages;
     elements.btnZoomIn.disabled = false;
@@ -259,6 +269,9 @@ function fileNameFromUrl(url) {
 }
 
 function closePDF() {
+  printing?.onDocumentChanged().catch(() => {});
+  originalPdfBytes = null;
+  documentGeneration += 1;
   search.cancel();
   search.clear();
   elements.searchInput.value = '';
@@ -314,6 +327,7 @@ function closePDF() {
   elements.pageTotal.textContent = '0';
   elements.zoomLevel.textContent = '100%';
   elements.btnClose.disabled = true;
+  elements.btnPrint.disabled = true;
   elements.btnPrev.disabled = true;
   elements.btnNext.disabled = true;
   elements.btnZoomIn.disabled = true;
@@ -898,6 +912,11 @@ function setupKeyboard() {
         toggleShortcuts(false);
         return;
       }
+      if (printing?.isOpen) {
+        e.preventDefault();
+        printing.close(true);
+        return;
+      }
       if (elements.searchBar.style.display !== 'none') {
         e.preventDefault();
         toggleSearch(false);
@@ -905,6 +924,10 @@ function setupKeyboard() {
       }
       return;
     }
+
+    // Keep shortcuts intended for the document behind the modal from leaking
+    // through while the print settings/preview dialog is active.
+    if (printing?.isOpen) return;
 
     if (key === 'F1') {
       e.preventDefault();
@@ -943,6 +966,13 @@ function setupKeyboard() {
     if (mod && (key === 'o' || key === 'O')) {
       e.preventDefault();
       openFile();
+      return;
+    }
+
+    if (mod && (key === 'p' || key === 'P')) {
+      e.preventDefault();
+      if (pdfDoc) printing?.open();
+      else setStatus('Open a PDF before printing.');
       return;
     }
 
@@ -1132,6 +1162,7 @@ function setupEvents() {
     const api = window.cambuzAPI;
     if (api.onMenuOpenFile) api.onMenuOpenFile(() => openFile());
     if (api.onMenuCloseFile) api.onMenuCloseFile(() => closePDF());
+    if (api.onMenuPrint) api.onMenuPrint(() => pdfDoc && printing?.open());
     if (api.onMenuZoomIn) api.onMenuZoomIn(() => zoomIn());
     if (api.onMenuZoomOut) api.onMenuZoomOut(() => zoomOut());
     if (api.onMenuFitPage) api.onMenuFitPage(() => fitToPage());
@@ -1172,6 +1203,18 @@ export function initApp() {
     getDoc: () => pdfDoc,
     getRotation: () => rotation,
     goToPage: (n) => goToPage(n),
+    onStatus: (msg) => setStatus(msg),
+  });
+
+  printing = new PrintController({
+    pdfjsLib,
+    standardFontDataUrl: STANDARD_FONT_DATA_URL,
+    getDoc: () => pdfDoc,
+    getSourceBytes: () => originalPdfBytes,
+    getCurrentPage: () => currentPage,
+    getTotalPages: () => totalPages,
+    getDocumentName: () => currentFileName,
+    getDocumentGeneration: () => documentGeneration,
     onStatus: (msg) => setStatus(msg),
   });
 
