@@ -56,6 +56,9 @@ async function createWelcomePdf() {
 
 async function createDemoPdf() {
   const doc = await PDFDocument.create();
+  doc.setTitle('Cambuz Demo Document');
+  doc.setAuthor('Cambuz PDF Reader');
+  doc.setSubject('Multi-page demo for reader testing');
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
   const italicFont = await doc.embedFont(StandardFonts.HelveticaOblique);

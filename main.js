@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 let mainWindow;
 
@@ -54,6 +55,22 @@ function createWindow() {
       ],
     },
     {
+      label: 'Edit',
+      submenu: [
+        {
+          label: 'Find in Document...',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => mainWindow.webContents.send('menu-find'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Select All Text on Page',
+          accelerator: 'CmdOrCtrl+A',
+          click: () => mainWindow.webContents.send('menu-select-all'),
+        },
+      ],
+    },
+    {
       label: 'View',
       submenu: [
         {
@@ -89,6 +106,27 @@ function createWindow() {
         },
         { type: 'separator' },
         {
+          label: 'Rotate Clockwise',
+          accelerator: 'CmdOrCtrl+Right',
+          click: () => mainWindow.webContents.send('menu-rotate-cw'),
+        },
+        {
+          label: 'Rotate Counter-clockwise',
+          accelerator: 'CmdOrCtrl+Left',
+          click: () => mainWindow.webContents.send('menu-rotate-ccw'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Toggle Sidebar',
+          accelerator: 'F9',
+          click: () => mainWindow.webContents.send('menu-sidebar'),
+        },
+        {
+          label: 'Toggle Full Screen',
+          accelerator: 'F11',
+          click: () => mainWindow.webContents.send('menu-fullscreen'),
+        },
+        {
           label: 'Toggle Dark/Light',
           accelerator: 'CmdOrCtrl+Shift+D',
           click: () => mainWindow.webContents.send('menu-toggle-theme'),
@@ -102,12 +140,18 @@ function createWindow() {
       label: 'Help',
       submenu: [
         {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'F1',
+          click: () => mainWindow.webContents.send('menu-shortcuts'),
+        },
+        { type: 'separator' },
+        {
           label: 'About Cambuz PDF Reader',
           click: () => {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'About Cambuz PDF Reader',
-              message: 'Cambuz PDF Reader v1.0.0',
+              message: 'Cambuz PDF Reader v1.1.0',
               detail: 'A lightweight, fast PDF reader.\nRead. Search. Print. Done.',
             });
           },
@@ -134,6 +178,29 @@ ipcMain.handle('dialog-open-file', async () => {
     return result.filePaths[0];
   }
   return null;
+});
+
+// Read a PDF from disk for the renderer (Phase 2: correct Electron file
+// loading + reopen of recent files by path).
+ipcMain.handle('read-file', async (_event, filePath) => {
+  try {
+    if (typeof filePath !== 'string' || !filePath) {
+      return { ok: false, error: 'No file path provided' };
+    }
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile()) {
+      return { ok: false, error: 'Not a file' };
+    }
+    const buffer = await fs.promises.readFile(filePath);
+    return {
+      ok: true,
+      name: path.basename(filePath),
+      size: buffer.length,
+      data: new Uint8Array(buffer),
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 app.whenReady().then(createWindow);

@@ -11,6 +11,11 @@
     <!-- Toolbar -->
     <header id="toolbar">
       <div class="toolbar-left">
+        <button id="btn-sidebar" class="toolbar-btn" title="Toggle Sidebar (F9)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>
+          </svg>
+        </button>
         <button id="btn-open" class="toolbar-btn" title="Open PDF (Ctrl+O)">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
@@ -46,6 +51,12 @@
       </div>
 
       <div class="toolbar-right">
+        <button id="btn-search" class="toolbar-btn" title="Search in Document (Ctrl+F)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </button>
+        <div class="toolbar-separator"></div>
         <button id="btn-zoom-out" class="toolbar-btn" title="Zoom Out (Ctrl+-)" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/>
@@ -58,14 +69,30 @@
           </svg>
         </button>
         <div class="toolbar-separator"></div>
-        <button id="btn-fit-page" class="toolbar-btn" title="Fit Page (Ctrl+0)" disabled>
+        <button id="btn-fit-page" class="toolbar-btn toolbar-btn-text" title="Fit Page (Ctrl+0)" disabled>
           <span>Fit Page</span>
         </button>
-        <button id="btn-fit-width" class="toolbar-btn" title="Fit Width (Ctrl+Shift+0)" disabled>
+        <button id="btn-fit-width" class="toolbar-btn toolbar-btn-text" title="Fit Width (Ctrl+Shift+0)" disabled>
           <span>Fit Width</span>
         </button>
         <div class="toolbar-separator"></div>
-        <button id="btn-theme" class="toolbar-btn" title="Toggle Theme">
+        <button id="btn-rotate-ccw" class="toolbar-btn" title="Rotate Counter-clockwise (Shift+R)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+          </svg>
+        </button>
+        <button id="btn-rotate-cw" class="toolbar-btn" title="Rotate Clockwise (R)" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+        </button>
+        <button id="btn-fullscreen" class="toolbar-btn" title="Full Screen (F11)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+        </button>
+        <div class="toolbar-separator"></div>
+        <button id="btn-theme" class="toolbar-btn" title="Toggle Theme (Ctrl+Shift+D)">
           <svg id="theme-icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
           </svg>
@@ -73,72 +100,183 @@
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
           </svg>
         </button>
+        <button id="btn-help" class="toolbar-btn" title="Keyboard Shortcuts (?)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </button>
       </div>
     </header>
 
-    <!-- Main Content Area -->
-    <main id="main-content">
-      <!-- Welcome Screen -->
-      <div id="welcome-screen">
-        <div class="welcome-inner">
-          <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="welcome-icon">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-            <polyline points="10 9 9 9 8 9"/>
-          </svg>
-          <h1>Cambuz PDF Reader</h1>
-          <p>Open a PDF to get started</p>
-          <button id="btn-welcome-open" class="btn-primary">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    <!-- Search bar (Phase 2) -->
+    <div id="search-bar" style="display:none">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input id="search-input" type="text" placeholder="Search in document…" autocomplete="off" spellcheck="false" aria-label="Search in document">
+      <span id="search-count" class="search-count" aria-live="polite"></span>
+      <button id="btn-search-prev" class="toolbar-btn" title="Previous Match (Shift+Enter)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="18 15 12 9 6 15"/>
+        </svg>
+      </button>
+      <button id="btn-search-next" class="toolbar-btn" title="Next Match (Enter)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      <button id="btn-search-close" class="toolbar-btn" title="Close Search (Esc)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Content row: sidebar + main -->
+    <div id="content-row">
+      <!-- Sidebar (Phase 2): thumbnails + bookmarks -->
+      <aside id="sidebar" style="display:none">
+        <div class="sidebar-tabs" role="tablist">
+          <button id="tab-thumbs" class="sidebar-tab active" role="tab" aria-selected="true">Thumbnails</button>
+          <button id="tab-outline" class="sidebar-tab" role="tab" aria-selected="false">Bookmarks</button>
+        </div>
+        <div id="sidebar-body">
+          <div id="thumbs-panel" role="tabpanel" aria-label="Page thumbnails"></div>
+          <div id="outline-panel" role="tabpanel" aria-label="Document bookmarks" style="display:none">
+            <p class="sidebar-empty">Open a document to see bookmarks.</p>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <main id="main-content">
+        <!-- Welcome Screen -->
+        <div id="welcome-screen">
+          <div class="welcome-inner">
+            <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="welcome-icon">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
             </svg>
-            Open PDF
-          </button>
-          <button id="btn-sample" class="btn-secondary">
-            Try Sample PDF
-          </button>
-          <p class="welcome-hint">or drag and drop a PDF file here</p>
-        </div>
-      </div>
+            <h1>Cambuz PDF Reader</h1>
+            <p>Open a PDF to get started</p>
+            <button id="btn-welcome-open" class="btn-primary">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              Open PDF
+            </button>
+            <button id="btn-sample" class="btn-secondary">
+              Try Sample PDF
+            </button>
+            <p class="welcome-hint">or drag and drop a PDF file here</p>
 
-      <!-- PDF Viewer (hidden until PDF is loaded) -->
-      <div id="pdf-viewer" style="display:none">
-        <div id="pdf-container">
-          <canvas id="pdf-canvas"></canvas>
+            <!-- Recent files (Phase 2) -->
+            <div id="recent-section" style="display:none">
+              <div class="recent-header">
+                <h2>Recent files</h2>
+                <button id="btn-clear-recents" class="link-btn" title="Clear recent files">Clear</button>
+              </div>
+              <ul id="recent-list"></ul>
+              <label class="reopen-setting">
+                <input type="checkbox" id="chk-reopen-last" checked>
+                Reopen last document on startup
+              </label>
+            </div>
+            <p class="welcome-hint">
+              <button id="btn-welcome-shortcuts" class="link-btn">Keyboard shortcuts</button>
+              <span class="hint-dot">•</span> Press <kbd>?</kbd> anytime
+            </p>
+          </div>
         </div>
-      </div>
 
-      <!-- Drop Overlay -->
-      <div id="drop-overlay" style="display:none">
-        <div class="drop-inner">
-          <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          <p>Drop PDF here</p>
+        <!-- PDF Viewer (hidden until PDF is loaded) -->
+        <div id="pdf-viewer" style="display:none">
+          <div id="pdf-container">
+            <div id="page-wrapper">
+              <canvas id="pdf-canvas"></canvas>
+              <div id="text-layer" class="textLayer"></div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <!-- Error Display -->
-      <div id="error-display" style="display:none">
-        <div class="error-inner">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-          </svg>
-          <p id="error-message">An error occurred</p>
-          <button id="btn-error-dismiss" class="btn-primary">OK</button>
+        <!-- Drop Overlay -->
+        <div id="drop-overlay" style="display:none">
+          <div class="drop-inner">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <p>Drop PDF here</p>
+          </div>
         </div>
-      </div>
-    </main>
+
+        <!-- Error Display -->
+        <div id="error-display" style="display:none">
+          <div class="error-inner">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+            <p id="error-message">An error occurred</p>
+            <button id="btn-error-dismiss" class="btn-primary">OK</button>
+          </div>
+        </div>
+      </main>
+    </div>
 
     <!-- Status Bar -->
     <footer id="status-bar">
       <span id="status-text">Ready</span>
-      <span id="status-file"></span>
+      <span class="status-right">
+        <span id="status-meta"></span>
+        <span id="status-file"></span>
+      </span>
     </footer>
+  </div>
+
+  <!-- Shortcuts dialog (Phase 2) -->
+  <div id="shortcuts-dialog" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+    <div class="dialog-inner">
+      <div class="dialog-header">
+        <h2 id="shortcuts-title">Keyboard Shortcuts</h2>
+        <button id="btn-shortcuts-close" class="toolbar-btn" title="Close (Esc)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="dialog-body">
+        <table class="shortcuts-table">
+          <tr><th colspan="2">File</th></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Open PDF</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>Close PDF</td></tr>
+          <tr><th colspan="2">Navigation</th></tr>
+          <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>Previous / next page</td></tr>
+          <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Previous / next page</td></tr>
+          <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>First / last page</td></tr>
+          <tr><td><kbd>F9</kbd></td><td>Toggle sidebar (thumbnails / bookmarks)</td></tr>
+          <tr><th colspan="2">Zoom &amp; View</th></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>Ctrl</kbd>+<kbd>−</kbd></td><td>Zoom in / out</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>0</kbd></td><td>Fit page</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>0</kbd></td><td>Fit width</td></tr>
+          <tr><td><kbd>R</kbd> / <kbd>Shift</kbd>+<kbd>R</kbd></td><td>Rotate clockwise / counter-clockwise</td></tr>
+          <tr><td><kbd>F11</kbd></td><td>Toggle full screen</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></td><td>Toggle dark / light theme</td></tr>
+          <tr><th colspan="2">Search &amp; Text</th></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Search in document</td></tr>
+          <tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Next / previous match</td></tr>
+          <tr><td><kbd>F3</kbd> / <kbd>Shift</kbd>+<kbd>F3</kbd></td><td>Next / previous match</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Close search / dialog</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Select all text on page</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>Copy selected text</td></tr>
+          <tr><th colspan="2">Help</th></tr>
+          <tr><td><kbd>?</kbd> or <kbd>F1</kbd></td><td>Show this dialog</td></tr>
+        </table>
+      </div>
+    </div>
   </div>
 
   <!-- PDF.js library — paths work for both Express and Electron -->

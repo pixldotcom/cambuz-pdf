@@ -2,11 +2,279 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 1 — Initial desktop reader  
+**Project status:** Phase 2 — Reading Experience  
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
 **Development approach:** Phase-by-phase, testable milestones
+
+---
+
+## Phase 2 — Implementation Status
+
+### Phase 2 Status: `PHASE 2 COMPLETE`
+
+Phase 1 functionality is fully preserved. Phase 2 adds the reading experience
+on top of it, with no Phase 3+ features (no printing, merging, splitting,
+forms, OCR, AI, cloud, accounts or telemetry).
+
+### Features Implemented
+
+| Requirement | Status |
+|---|---|
+| Page thumbnails (lazy, sidebar) | ✅ Implemented |
+| Document outline / bookmarks | ✅ Implemented |
+| Search within PDF (Unicode) | ✅ Implemented |
+| Search result highlighting | ✅ Implemented |
+| Text selection (text layer) | ✅ Implemented |
+| Copy text | ✅ Implemented |
+| Select all (page) | ✅ Implemented |
+| Keyboard shortcuts (extended) | ✅ Implemented |
+| Recent files | ✅ Implemented |
+| Reopen last document | ✅ Implemented |
+| Full-screen reading | ✅ Implemented |
+| Page rotation (90° steps) | ✅ Implemented |
+| Status information (page/zoom/rotation/size) | ✅ Implemented |
+| Better keyboard navigation | ✅ Implemented |
+| Shortcuts help dialog | ✅ Implemented |
+
+### Technology Deltas (Phase 2)
+
+| Area | Choice |
+|---|---|
+| **Text selection** | PDF.js `TextLayer` overlay on the page canvas |
+| **Search** | Per-page `getTextContent` index, NFC + case-fold matching, DOM highlight marks |
+| **Thumbnails** | Small-scale canvas renders with `IntersectionObserver` lazy loading |
+| **Outline** | `getOutline()` with named-destination resolution |
+| **Recents** | `localStorage` metadata + `IndexedDB` byte cache (web) / native paths (Electron) |
+| **Rotation** | `getViewport({ rotation })` re-render, thumbnails refreshed |
+| **Full screen** | Fullscreen API (`F11` / toolbar) |
+
+### Dependencies
+
+Phase 2 adds dev-only dependencies used to generate and verify Unicode
+fixtures. The runtime still needs only `pdfjs-dist` + `express`.
+
+| Package | Version | Purpose | Runtime? |
+|---|---|---|---|
+| `pdfjs-dist` | ^4.0.379 | PDF rendering engine | Yes |
+| `express` | ^4.18.2 | Web server for preview mode | Yes (preview) |
+| `electron` | ^28.0.0 | Desktop application shell (dev) | App shell |
+| `pdf-lib` | ^1.17.1 | Basic sample PDF generation (dev) | No |
+| `@pdf-lib/fontkit` | ^1.1.1 | Custom-font support experiments (dev) | No |
+| `@expo-google-fonts/noto-sans-devanagari` | ^0.4.1 | Noto Devanagari TTF for samples (dev) | No |
+| `@expo-google-fonts/noto-sans-gurmukhi` | ^0.4.1 | Noto Gurmukhi TTF for samples (dev) | No |
+| `jsdom` | latest | DOM-level automated tests (dev) | No |
+| `fpdf2` + `uharfbuzz` (pip) | — | Shaped Unicode sample PDFs (dev) | No |
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/pixldotcom/cambuz-pdf.git
+cd cambuz-pdf
+
+# Install dependencies (Electron binary download may fail in restricted
+# sandboxes; the web preview works without it)
+npm install --ignore-scripts
+
+# Optional: needed only to regenerate the Unicode sample PDFs
+pip install fpdf2 uharfbuzz
+
+# Run as web application (for preview/testing)
+npm run serve
+
+# Run as desktop application (requires Electron)
+npm start
+
+# Generate all sample PDFs (basic + Unicode)
+npm run samples
+
+# Run the automated test suites (167 assertions)
+npm test
+```
+
+### Development Commands
+
+| Command | Description |
+|---|---|
+| `npm run serve` | Start web server on port 3000 |
+| `npm start` | Launch Electron desktop app |
+| `npm run samples` | Generate all sample PDFs (JS + Python) |
+| `npm run samples:js` | Generate basic samples only |
+| `npm run samples:unicode` | Generate Unicode samples only (needs fpdf2) |
+| `npm test` | Run Node + DOM test suites |
+| `npm run test:node` | Run PDF/extraction/search/outline tests |
+| `npm run test:dom` | Run DOM tests (highlight/outline/recents/wiring) |
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+O` | Open PDF |
+| `Ctrl+W` | Close PDF (desktop) |
+| `Ctrl+F` | Search in document |
+| `Enter` / `Shift+Enter` | Next / previous match |
+| `F3` / `Shift+F3` | Next / previous match |
+| `Esc` | Close search / dialog, exit full screen |
+| `PageUp` / `PageDown` | Previous / Next page |
+| `←` / `→` | Previous / next page |
+| `Home` / `End` | First / Last page |
+| `F9` | Toggle sidebar (thumbnails / bookmarks) |
+| `Ctrl+Plus` / `Ctrl+Minus` | Zoom in / Zoom out |
+| `Ctrl+0` | Fit page |
+| `Ctrl+Shift+0` | Fit width |
+| `R` / `Shift+R` | Rotate clockwise / counter-clockwise |
+| `F11` | Toggle full screen |
+| `Ctrl+A` | Select all text on page |
+| `Ctrl+C` | Copy selected text |
+| `Ctrl+Shift+D` | Toggle dark/light theme |
+| `?` or `F1` | Keyboard shortcuts dialog |
+
+### Project Structure
+
+```
+cambuz-pdf/
+├── main.js                  # Electron main process (menus, file IPC)
+├── preload.js               # Electron preload script (IPC bridge)
+├── server.js                # Express web server for preview
+├── package.json             # Project configuration
+├── src/
+│   ├── index.html           # Main application HTML (toolbar, sidebar, search)
+│   ├── renderer.js          # Loading, rendering, nav, zoom, rotation, events
+│   ├── search.js            # Unicode search engine + highlighting
+│   ├── sidebar.js           # Thumbnails + document outline
+│   ├── recents.js           # Recent files + IndexedDB byte cache
+│   └── styles.css           # Application styles (dark/light)
+├── scripts/
+│   ├── create-samples.js    # Basic sample PDFs (pdf-lib)
+│   ├── create-unicode-samples.py  # Hindi/Punjabi/multilingual PDFs (fpdf2)
+│   ├── test-phase2.mjs      # Node test suite (PDF-level)
+│   └── test-phase2-dom.mjs  # DOM test suite (jsdom)
+├── samples/                 # Sample PDF files for testing
+│   ├── welcome.pdf          # 5-page welcome document
+│   ├── cambuz-demo.pdf      # 10-page comprehensive demo
+│   ├── hindi-sample.pdf     # 4-page Devanagari sample (पंजाब ×6)
+│   ├── punjabi-sample.pdf   # 4-page Gurmukhi sample (ਪੰਜਾਬ ×6)
+│   └── multilingual.pdf     # 7-page EN/HI/PA sample with outline (each term ×12)
+├── assets/                  # Application assets
+└── README.md                # This file
+```
+
+### Architecture
+
+```
+Cambuz PDF Reader
+       |
++------+------+------+------+------+
+|      |      |      |      |      |
+| PDF  | Text |Search|Side- | File |
+|Render| Layer|Engine| bar  | I/O  |
+|      |      |      |      |      |
++------+------+------+------+------+
+       |      |
+  PDF.js Engine  IndexedDB/localStorage
+                 (recents)
+```
+
+- **Rendering**: PDF.js renders pages to canvas (high-DPI); a `TextLayer`
+  overlay provides selection, copy and search highlights
+- **Search**: document-wide Unicode index (NFC + case folding); matches on
+  the current page are wrapped in `<mark>` elements, the current match is
+  scrolled into view; navigation wraps across pages
+- **Sidebar**: lazy thumbnails + hierarchical outline with expand/collapse
+- **Recents**: metadata in `localStorage`; web mode caches small files in
+  `IndexedDB` so reopen works; Electron reopens by native path
+- **Rotation**: 0/90/180/270° applied to canvas, text layer and thumbnails
+
+### Search Verification (Unicode)
+
+Required queries were verified end-to-end with the app's own matching
+algorithm against the real sample PDFs:
+
+| Query | multilingual.pdf | hindi-sample.pdf | punjabi-sample.pdf |
+|---|---|---|---|
+| `Punjab` | 12 | 0 | 0 |
+| `पंजाब` | 12 | 6 | 0 |
+| `ਪੰਜਾਬ` | 12 | 0 | 6 |
+
+Full-page golden-text assertions (15 pages) guarantee byte-exact extraction
+with no control-character corruption. All three scripts also render with
+correct shaping (verified by rasterizing pages to PNG).
+
+### Known Limitations
+
+- **Electron binary**: cannot be installed in restricted environments; the
+  new Electron file-read IPC and menus are code-reviewed but not yet
+  executed in this sandbox — verify on a Windows machine (see manual
+  checklist below)
+- **Sample-generator constraint**: the fpdf2-based generator mis-encodes
+  `ToUnicode` for pre-base matras (ि/ਿ) and some ligature+matra sequences,
+  so sample content avoids those constructions (every word is
+  extraction-verified). This is a fixture limitation, not a reader
+  limitation — the reader decodes whatever `ToUnicode`/`ActualText` a PDF
+  provides. Phase 6 will add real-world conjunct-heavy fixtures
+- **Single page view**: one page at a time (continuous scroll still future)
+- **No printing**: Phase 3 feature (explicitly excluded; absence verified)
+- **No page manipulation / forms / passwords**: Phase 4–5 features
+- **Recent-file cache**: web-mode byte cache capped at 5 files × 60 MiB;
+  larger/older files must be reopened manually
+- **Search**: case-insensitive substring search; no regex, no whole-word or
+  diacritic-insensitive options yet
+
+### Tests Performed (Automated — 167 assertions, all passing)
+
+Node suite (`npm run test:node`, 116 assertions):
+
+1. All 5 sample PDFs exist and parse with expected page counts
+2. Unicode extraction intact (पंजाब/ਪੰਜਾਬ/Punjab, conjuncts क्ष त्र ज्ञ श्र
+   द्ध ह्म, adhak words ਪੁੱਤਰ/ਮੱਖਣ/ਦੁੱਧ, digits, danda, no control chars)
+3. Search-helper unit tests (offsets, case folding, native-script queries,
+   byte-exact slices, NFC stability)
+4. End-to-end search counts via the app algorithm (12/12/12, 6, 6)
+5. Full-text golden check on all 15 Unicode sample pages
+6. Outlines present (8/4/4 entries) and every destination resolves to a page
+7. Metadata (title/author) present
+8. Rotation viewport math (90° swaps dimensions, 180° preserves)
+9. Syntax check (`node --check`) on all 10 JS sources
+10. No Phase-3+ leakage (print/merge/split/OCR/telemetry strings absent)
+11. Recents pure helpers (ids, sizes, relative time)
+
+DOM suite (`npm run test:dom`, 51 assertions, jsdom + real modules):
+
+1. All 62 required element ids present in `index.html`
+2. Real `SearchController`: highlight marks created for EN/HI/PA queries
+   with byte-exact text, current-mark tracking, wrap navigation, clear()
+3. Real `SidebarController`: nested outline build, collapse/expand,
+   explicit + named destination navigation, external-URL handling, tabs
+4. Real `recents.js`: add/list/update/remove/clear round-trip in
+   `localStorage`, reopen-last setting
+5. `renderer.js` imports cleanly against the real DOM
+
+Server checks (manual, all 200 with correct MIME types): `/`,
+`/src/*`, `pdf.mjs`, `pdf.worker.mjs`, standard fonts, all 5 sample PDFs.
+
+Render checks: Hindi/Punjabi/mixed pages rasterized to PNG and visually
+verified (correct shaping, conjuncts, matras, bindi/anusvara).
+
+### Manual Browser Checklist (for a machine with a display)
+
+The live preview (`npm run serve` → http://localhost:3000) supports the
+full flow; verify on Windows + Electron before release:
+
+1. Open `samples/multilingual.pdf` via Open button, drag-and-drop and `?pdf=` URL
+2. Sidebar: thumbnails render lazily, click navigates; Bookmarks tab lists
+   8 entries, click jumps to the right page
+3. Search `Punjab`, `पंजाब`, `ਪੰਜਾਬ`: counts read 12, highlights show on
+   every page, Enter/F3 wrap through all matches
+4. Select Hindi/Punjabi text with the mouse, copy, paste into Notepad —
+   glyphs must be byte-identical
+5. `Ctrl+A` selects page text; `R`/`Shift+R` rotate; thumbnails follow
+6. `F11` full screen; `F9` sidebar; `?` shortcuts dialog; theme toggle
+7. Reload: recent files list the document; reopen restores the last page
+8. Close (`Ctrl+W`), open another PDF, invalid-file error path
+9. Electron only: native Open dialog, menus (Find/Rotate/Fullscreen/
+   Sidebar/Shortcuts), reopen-by-path after restart
 
 ---
 
