@@ -101,10 +101,12 @@ Phases 1–4 is unchanged.
   two-page form with every supported field type plus a read-only field.
 - **Not exercised:** the Electron desktop shell (no display or Electron binary
   in this sandbox), so the new File-menu entries, the native save dialog and the
-  native print route are reviewed but untested at runtime. Also untested here:
-  real-world forms from other producers, XFA/dynamic forms, signature fields,
-  canvas rendering (jsdom has no canvas — verified in the browser preview
-  instead), and physical printing.
+  native print route are reviewed but untested at runtime. The web build is
+  served by `npm run serve` for manual checks in a browser; this sandbox has no
+  browser, so canvas rendering, the on-page look of the form controls and
+  physical printing were **not** observed here and still need a human pass.
+  Also untested: real-world forms from other producers, XFA/dynamic forms and
+  signature fields.
 
 ### Known limitations (Phase 5)
 
