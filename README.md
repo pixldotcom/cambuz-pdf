@@ -2,11 +2,99 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 5 — Security and forms implemented and tested; Electron desktop shell and physical-printer verification pending<br>
+**Project status:** Phase 6 — Indian-language compatibility fixtures and automated reader/print checks implemented; OS clipboard, Electron and physical-printer verification pending<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
 **Development approach:** Phase-by-phase, testable milestones
+
+---
+
+## Phase 6 — Indian Language Excellence
+
+### Phase 6 status: `FIXTURES + AUTOMATED COMPATIBILITY TESTS PASS; DEVICE CHECKS PENDING`
+
+Phase 6 preserves Phases 1–5 and adds a language compatibility suite that
+checks text extraction and app behavior as well as visible rendering. The
+main fixture has 16 pages: a cover, separate English and target
+language pages, a mixed-script page and combining-mark/conjunct stress page.
+Two one-page Tamil companions separately check visible text painted from an
+embedded Noto font and missing-font fallback while retaining the Unicode map.
+
+Each language row below is tested against its real PDF.js page for exact sample
+text, two search hits, text-layer selection, a serialized clipboard payload,
+visible PDF.js raster output, and logical text/search after print-PDF assembly.
+"Clipboard payload" is emulated from the browser `Selection` in jsdom; it is not
+an OS clipboard test. The print test rebuilds and reopens Cambuz's vector
+print-ready PDF; it does not send pages to a physical printer.
+
+| Language | Script / direction | Fixture page | Search query |
+|---|---|---:|---|
+| English | Latin, LTR | 2 | `LANGKEY` |
+| Hindi | Devanagari, LTR | 3 | `नमूना` |
+| Punjabi | Gurmukhi, LTR | 4 | `ਕੁੰਜੀ` |
+| Bengali | Bengali, LTR | 5 | `কীচিহ্ন` |
+| Gujarati | Gujarati, LTR | 6 | `કસોટી` |
+| Marathi | Devanagari, LTR | 7 | `चिन्ह` |
+| Tamil | Tamil, LTR | 8 | `குறி` |
+| Telugu | Telugu, LTR | 9 | `సంకేతం` |
+| Kannada | Kannada, LTR | 10 | `ಗುರುತು` |
+| Malayalam | Malayalam, LTR | 11 | `കുറി` |
+| Odia | Odia, LTR | 12 | `ଚିହ୍ନ` |
+| Assamese | Bengali script, LTR | 13 | `চাবি` |
+| Urdu | Arabic/Nastaliq, RTL | 14 | `کلید` |
+
+**Additional cases:** page 15 combines the English and all twelve target
+languages (including a separate RTL Urdu run); page 16 exercises Devanagari
+NFC/NFD nukta spellings, conjuncts, Gurmukhi/Bengali combining sequences and
+Urdu marks. A synthetic DOM case also splits the Hindi conjunct `क्षत्रिय`
+across four PDF.js text items and verifies search, highlighting and clear.
+The embedded-font Tamil companion exercises PDF.js's visible font-painting path;
+the missing-font fixture verifies retained extraction/search and that the
+fallback render path completes in this Node environment.
+
+### Phase 6 verification
+
+- `npm run test:phase6` — **229 assertions, all passing**. It uses the real
+  `SearchController`, PDF.js `TextLayer`, PDF.js extraction/rasterization,
+  `@napi-rs/canvas`, and the production `buildPrintPdf` path.
+- `npm test` — **866 assertions, all passing** across the existing Phase 2–5
+  regression suites and the new Phase 6 suite (123 + 59 + 54 + 133 + 268 + 229).
+- `npm run samples:phase6` regenerates all three PDFs. Generation requires the
+  development Noto font packages plus Python `fpdf2`, `uharfbuzz`, `fonttools`
+  and `pypdf` (installation instructions below).
+- **Not verified here:** native OS clipboard integration, browser/Electron
+  rendering beyond PDF.js in Node, Electron's native print route, and physical
+  printer output. Those still need the manual Windows/browser checks below.
+
+### Phase 6 known limitations
+
+- These are controlled fixtures, not a guarantee for every PDF exporter,
+  Unicode map, font program, language variety or shaping convention. Real PDFs
+  may have incomplete or incorrect `/ToUnicode` or `/ActualText`; the reader
+  cannot infer source text that a file does not encode.
+- The sample text has been shaped with Noto font data and its visible forms are
+  embedded as vector outlines, with a separate Unicode text layer. That gives
+  reliable fixture rendering/extraction, but it is not a substitute for testing
+  arbitrary embedded fonts in target browsers and Windows/Electron.
+- Tamil missing-font coverage confirms logical text and generic fallback
+  execution only. The sandbox has no guaranteed Tamil system font, so it cannot
+  certify the legibility or correctness of fallback glyph shapes on a user's
+  machine.
+- Urdu extraction, `dir="rtl"`, selection, search and print-PDF text are
+  verified. The fixture keeps Urdu as a dedicated RTL run; mixed-direction
+  Latin and Urdu within the *same* text run and broader bidi punctuation/layout
+  cases are not covered. PDF.js bidi processing can reorder mixed-run text.
+- Assamese uses Bengali script and the Bengali font; the fixture tests only the
+  selected Assamese-specific characters, not full Assamese orthographic/font
+  coverage. Marathi uses the Devanagari fixture font.
+- The jsdom clipboard check verifies the selected Unicode string that a normal
+  browser copy action serializes; it does not exercise the privileged OS
+  clipboard or permission-enforcement UI. The physical printer and native
+  driver output also remain untested in this sandbox.
+- Search is NFC-normalized substring matching with case-insensitive Latin
+  matching. It is not transliteration, stemming, locale-specific collation,
+  diacritic-insensitive search, regex or whole-word search.
 
 ---
 
@@ -289,9 +377,9 @@ forms, OCR, AI, cloud, accounts and telemetry remain outside scope.
 
 ### Dependencies
 
-Phase 2 added development dependencies for Unicode fixtures. Phase 3 adds
-`pdf-lib` as a runtime dependency to compose the vector-preserving print PDF;
-the web preview also uses `express`.
+Phases 2 and 6 add development dependencies for Unicode fixtures and PDF.js
+raster tests. Phase 3 adds `pdf-lib` as a runtime dependency to compose the
+vector-preserving print PDF; the web preview also uses `express`.
 
 | Package | Version | Purpose | Runtime? |
 |---|---|---|---|
@@ -302,8 +390,10 @@ the web preview also uses `express`.
 | `@pdf-lib/fontkit` | ^1.1.1 | Custom-font support experiments (dev) | No |
 | `@expo-google-fonts/noto-sans-devanagari` | ^0.4.1 | Noto Devanagari TTF for samples (dev) | No |
 | `@expo-google-fonts/noto-sans-gurmukhi` | ^0.4.1 | Noto Gurmukhi TTF for samples (dev) | No |
-| `jsdom` | latest | DOM-level automated tests (dev) | No |
-| `fpdf2` + `uharfbuzz` (pip) | — | Shaped Unicode sample PDFs (dev) | No |
+| `@expo-google-fonts/noto-*` | versions in `package.json` | Noto Bengali, Gujarati, Tamil, Telugu, Kannada, Malayalam, Odia and Urdu TTFs (dev) | No |
+| `@napi-rs/canvas` | ^1.0.10 | Node-side PDF.js raster assertions (dev) | No |
+| `jsdom` | ^30.1.2 | DOM-level automated tests (dev) | No |
+| `fpdf2` + `uharfbuzz` + `fonttools` + `pypdf` (pip) | — | Shaped/extracted Unicode fixtures (dev) | No |
 
 ### Installation
 
@@ -319,7 +409,10 @@ npm install
 # web preview and automated tests, but not npm start / native printing.
 
 # Optional: needed only to regenerate the Unicode sample PDFs
-pip install fpdf2 uharfbuzz
+pip install fpdf2 uharfbuzz fonttools pypdf
+
+# Regenerate Phase 6 multilingual and missing-font fixtures
+npm run samples:phase6
 
 # Optional: needed only to regenerate the Phase 5 encrypted fixtures
 pip install pypdf
@@ -336,7 +429,7 @@ npm run samples
 # Generate the Phase 5 fixtures (encrypted PDFs need pypdf)
 npm run samples:secure
 
-# Run the automated test suites (637 assertions)
+# Run the automated test suites (866 assertions across Phases 2–6)
 npm test
 ```
 
@@ -350,12 +443,14 @@ npm test
 | `npm run samples:js` | Generate basic samples only |
 | `npm run samples:unicode` | Generate Unicode samples only (needs fpdf2) |
 | `npm run samples:secure` | Generate Phase 5 fixtures (JS + Python, needs pypdf) |
-| `npm test` | Run Node, DOM, Phase 3 print, Phase 4 page-tool and Phase 5 security/form suites |
+| `npm run samples:phase6` | Generate multilingual, embedded-font and missing-font fixtures (Python + Noto dev fonts) |
+| `npm test` | Run Node, DOM, Phase 3 print, Phase 4 page-tool, Phase 5 security/form and Phase 6 language suites |
 | `npm run test:node` | Run PDF/extraction/search/outline tests |
 | `npm run test:dom` | Run DOM tests (highlight/outline/recents/wiring) |
 | `npm run test:phase3` | Run print-range, layout, PDF-output and Ink Saver tests |
 | `npm run test:phase4` | Run page operation, merge/split, metadata and page-tools dialog tests |
 | `npm run test:phase5` | Run password, permission, AcroForm, password-dialog, form-filling and security-dialog tests |
+| `npm run test:phase6` | Run extraction, grapheme-safe search, selection/copy-payload, rendering, missing-font and print-PDF tests across English and twelve target languages |
 
 ### Keyboard Shortcuts
 
@@ -414,11 +509,13 @@ cambuz-pdf/
 │   ├── create-unicode-samples.py  # Hindi/Punjabi/multilingual PDFs (fpdf2)
 │   ├── create-secure-samples.js   # AcroForm + secure fixtures (pdf-lib)
 │   ├── create-secure-samples.py   # Encrypted fixtures (pypdf)
+│   ├── create-phase6-samples.py   # HarfBuzz-shaped Indian-language fixtures
 │   ├── test-phase2.mjs      # Node PDF/extraction/search suite
 │   ├── test-phase2-dom.mjs  # DOM/reader/print wiring suite (jsdom)
 │   ├── test-phase3.mjs      # Print composition and validation suite
 │   ├── test-phase4.mjs      # Page operations, merge/split, metadata and page-tools dialog suite
-│   └── test-phase5.mjs      # Security, permissions, forms and password-dialog suite
+│   ├── test-phase5.mjs      # Security, permissions, forms and password-dialog suite
+│   └── test-phase6.mjs      # Indian-language extraction, UI, raster and print tests
 ├── scripts/fixtures/        # Encrypted and AcroForm test fixtures
 ├── samples/                 # Sample PDF files for testing
 │   ├── welcome.pdf          # 5-page welcome document
@@ -426,7 +523,10 @@ cambuz-pdf/
 │   ├── form-sample.pdf      # 1-page fillable feedback form
 │   ├── hindi-sample.pdf     # 4-page Devanagari sample (पंजाब ×6)
 │   ├── punjabi-sample.pdf   # 4-page Gurmukhi sample (ਪੰਜਾਬ ×6)
-│   └── multilingual.pdf     # 7-page EN/HI/PA sample with outline (each term ×12)
+│   ├── multilingual.pdf     # 7-page EN/HI/PA sample with outline (each term ×12)
+│   ├── phase6-indian-languages.pdf # English + 12 target languages, mixed, stress
+│   ├── phase6-embedded-font.pdf    # Visible Tamil text with embedded Noto font
+│   └── phase6-missing-font.pdf     # Tamil with its embedded font program removed
 ├── assets/                  # Application assets
 └── README.md                # This file
 ```
@@ -449,9 +549,10 @@ Cambuz PDF Reader
 
 - **Rendering**: PDF.js renders pages to canvas (high-DPI); a `TextLayer`
   overlay provides selection, copy and search highlights
-- **Search**: document-wide Unicode index (NFC + case folding); matches on
-  the current page are wrapped in `<mark>` elements, the current match is
-  scrolled into view; navigation wraps across pages
+- **Search**: document-wide Unicode index (NFC + case folding, grapheme-safe
+  source offsets, adjacent PDF.js text-item joining with explicit line breaks);
+  matches are wrapped in `<mark>` elements, the current match is scrolled into
+  view, and navigation wraps across pages
 - **Sidebar**: lazy thumbnails + hierarchical outline with expand/collapse
 - **Recents**: metadata in `localStorage`; web mode caches small files in
   `IndexedDB` so reopen works; Electron reopens by native path
@@ -473,7 +574,9 @@ algorithm against the real sample PDFs:
 
 Full-page golden-text assertions (15 pages) guarantee byte-exact extraction
 with no control-character corruption. All three scripts also render with
-correct shaping (verified by rasterizing pages to PNG).
+correct shaping (verified by rasterizing pages to PNG). Phase 6 adds the
+13-language fixture matrix and grapheme-aware offsets; see the dedicated
+compatibility matrix and `npm run test:phase6` results above.
 
 ### Known Limitations
 
@@ -495,12 +598,11 @@ correct shaping (verified by rasterizing pages to PNG).
 - **Browser printer access**: web mode cannot enumerate native printers; it
   opens the system PDF/print flow instead. Electron mode provides the printer
   selector and direct native route.
-- **Sample-generator constraint**: the fpdf2-based generator mis-encodes
-  `ToUnicode` for pre-base matras (ि/ਿ) and some ligature+matra sequences,
-  so sample content avoids those constructions (every word is
-  extraction-verified). This is a fixture limitation, not a reader
-  limitation — the reader decodes whatever `ToUnicode`/`ActualText` a PDF
-  provides. Phase 6 will add real-world conjunct-heavy fixtures.
+- **Legacy sample-generator constraint**: older fpdf2-generated Hindi/Punjabi
+  fixtures can mis-encode `ToUnicode` for pre-base matras and some
+  ligature-plus-matra sequences. Phase 6's separate HarfBuzz-shaped fixture
+  has its own verified Unicode map and covers conjunct/combining cases; use it
+  rather than the legacy PDFs as Phase 6 search/copy evidence.
 - **Single page view**: one page at a time (continuous scroll still future)
 - **No continuous scroll / no annotation authoring**: single page view; page operations and form filling are Phases 4–5 and are implemented
 - **Recent-file cache**: web-mode byte cache capped at 5 files × 60 MiB;
@@ -508,7 +610,7 @@ correct shaping (verified by rasterizing pages to PNG).
 - **Search**: case-insensitive substring search; no regex, no whole-word or
   diacritic-insensitive options yet
 
-### Tests Performed (Automated — 236 assertions, all passing)
+### Earlier regression suites (Phases 2–5 — 637 assertions, all passing)
 
 Node suite (`npm run test:node`, 123 assertions):
 
@@ -559,6 +661,18 @@ still require the manual checklist below; they are not asserted as hardware-test
 Start the web preview with `npm run serve` (port 3000). The live preview can
 exercise the UI and browser print fallback; Windows + Electron is required to
 verify native printer enumeration and driver output.
+
+**Phase 6 language checks:**
+
+- Open `samples/phase6-indian-languages.pdf`; search each matrix query, select
+  and copy a sample from each language, and inspect Urdu direction and the
+  mixed-script page.
+- Open `samples/phase6-missing-font.pdf` on a system with and without Tamil
+  fonts; compare fallback rendering with the selectable/searchable text.
+- Open the prepared print PDF from the Phase 6 fixture and inspect conjuncts,
+  combining marks, mixed scripts and Urdu output on paper/PDF.
+- Repeat on the target browser and Windows/Electron builds; the automated
+  Node/jsdom suite is not a substitute for native clipboard/printer testing.
 
 1. Open `samples/multilingual.pdf` via Open, drag-and-drop and `?pdf=` URL
 2. Sidebar thumbnails/bookmarks, Unicode search, copy/select-all, rotation,
