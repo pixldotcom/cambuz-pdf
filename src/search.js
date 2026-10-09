@@ -29,14 +29,65 @@ export function foldCase(s) {
   return s.toLowerCase();
 }
 
+let graphemeSegmenter = null;
+
+/** Split a string into graphemes with UTF-16 source offsets. */
+function getGraphemeSegments(text) {
+  if (typeof Intl.Segmenter === 'function') {
+    graphemeSegmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    return [...graphemeSegmenter.segment(text)].map(({ segment, index }) => ({
+      segment,
+      index,
+      end: index + segment.length,
+    }));
+  }
+
+  // Compatibility fallback for older runtimes. It preserves combining marks,
+  // variation selectors and join controls; supported Electron/Chromium builds
+  // use Intl.Segmenter and its full Unicode grapheme rules.
+  const segments = [];
+  let joinNext = false;
+  for (let index = 0; index < text.length;) {
+    const codePoint = text.codePointAt(index);
+    const char = String.fromCodePoint(codePoint);
+    const length = char.length;
+    const isExtend = /[\p{M}\u200c\u200d\ufe0e\ufe0f]/u.test(char);
+    if ((isExtend || joinNext) && segments.length) {
+      const last = segments[segments.length - 1];
+      last.segment += char;
+      last.end += length;
+    } else {
+      segments.push({ segment: char, index, end: index + length });
+    }
+    joinNext = char === '\u200d';
+    index += length;
+  }
+  return segments;
+}
+
+/** Build a comparison string plus a safe range map back to source graphemes. */
+function buildComparisonIndex(text, matchCase) {
+  const pieces = [];
+  const offsets = [];
+  for (const { segment, index, end } of getGraphemeSegments(text)) {
+    let normalized = normalizeStr(segment);
+    if (!matchCase) normalized = foldCase(normalized);
+    if (!normalized) continue;
+    pieces.push(normalized);
+    for (let unit = 0; unit < normalized.length; unit += 1) {
+      offsets.push({ start: index, end });
+    }
+  }
+  return { text: pieces.join(''), offsets };
+}
+
 /**
  * Find all non-overlapping occurrences of `query` inside `text`.
  *
- * Returns an array of { index, length } where index/length refer to offsets
- * in the *original* `text` string whenever that mapping is safe. If Unicode
- * normalization or case folding would change string lengths (extremely rare;
- * e.g. Turkish dotted-I edge cases), the matcher falls back to raw
- * comparison so indices can never point at the wrong characters.
+ * Returns { index, length } ranges in the original UTF-16 string. When
+ * normalization or lowercasing expands a grapheme, the range maps back to the
+ * complete source grapheme so DOM highlighting never splits a combining
+ * sequence or ligature-like cluster.
  *
  * @param {string} text
  * @param {string} query
@@ -48,37 +99,29 @@ export function findAllMatches(text, query, matchCase = false) {
   const rawQuery = typeof query === 'string' ? query : '';
   if (!rawQuery) return [];
 
-  const normText = rawText.normalize('NFC');
-  const normQuery = rawQuery.normalize('NFC');
-
-  // Use normalized strings only if offsets still map 1:1 onto the originals.
-  const normSafe =
-    normText.length === rawText.length && normQuery.length === rawQuery.length;
-  const baseText = normSafe ? normText : rawText;
-  let baseQuery = normSafe ? normQuery : rawQuery;
-
-  let hay = baseText;
-  let needle = baseQuery;
-  if (!matchCase) {
-    const foldedHay = foldCase(baseText);
-    const foldedNeedle = foldCase(baseQuery);
-    // If folding changes lengths, indices would misalign — fall back to a
-    // case-sensitive pass on the unfolded strings instead of corrupting
-    // offsets.
-    if (foldedHay.length !== baseText.length || foldedNeedle.length !== baseQuery.length) {
-      return findAllMatches(rawText, rawQuery, true);
-    }
-    hay = foldedHay;
-    needle = foldedNeedle;
-  }
+  const haystack = buildComparisonIndex(rawText, matchCase);
+  let needle = normalizeStr(rawQuery);
+  if (!matchCase) needle = foldCase(needle);
+  if (!needle) return [];
 
   const matches = [];
   let from = 0;
-  while (from <= hay.length) {
-    const i = hay.indexOf(needle, from);
-    if (i < 0) break;
-    matches.push({ index: i, length: needle.length });
-    from = i + needle.length;
+  while (from <= haystack.text.length) {
+    const index = haystack.text.indexOf(needle, from);
+    if (index < 0) break;
+    const first = haystack.offsets[index];
+    const last = haystack.offsets[index + needle.length - 1];
+    if (first && last) {
+      const match = { index: first.start, length: last.end - first.start };
+      const previous = matches[matches.length - 1];
+      // Case conversion can expand one grapheme (for example, dotted-I).
+      // Do not count two normalized code points as duplicate hits on the same
+      // source grapheme.
+      if (!previous || previous.index !== match.index || previous.length !== match.length) {
+        matches.push(match);
+      }
+    }
+    from = index + needle.length;
   }
   return matches;
 }
@@ -89,22 +132,65 @@ export function findAllMatches(text, query, matchCase = false) {
  */
 export function verifyMatch(text, index, length, query, matchCase = false) {
   const raw = typeof text === 'string' ? text : '';
-  if (index < 0 || length <= 0 || index + length > raw.length) return false;
-  const slice = raw.slice(index, index + length);
-  const a = normalizeStr(slice);
-  const b = normalizeStr(query);
-  if (a.length !== length || b.length !== length) {
-    // Lengths shifted under normalization; compare without it.
-    if (matchCase) return slice === query;
-    return foldCase(slice) === foldCase(query);
+  if (typeof query !== 'string' || !query || index < 0 || length <= 0 || index + length > raw.length) {
+    return false;
   }
-  if (matchCase) return a === b;
-  return foldCase(a) === foldCase(b);
+  const sourceRange = raw.slice(index, index + length);
+  const comparison = buildComparisonIndex(sourceRange, matchCase).text;
+  let expected = normalizeStr(query);
+  if (!matchCase) expected = foldCase(expected);
+  // A comparison range may be the whole source grapheme while the query is a
+  // substring of its normalized form (e.g. case-expanded dotted-I). The range
+  // must still contain the query before it is safe to highlight.
+  return comparison.includes(expected);
 }
 
 /** Count matches of `query` inside `text`. */
 export function countMatches(text, query, matchCase = false) {
   return findAllMatches(text, query, matchCase).length;
+}
+
+/**
+ * Reconstruct a page's logical text stream from PDF.js text items. Text may
+ * be split across font/style runs; joining adjacent items lets a query find a
+ * word even when a PDF divides it into several positioned spans. Explicit
+ * PDF.js end-of-line markers remain separators, so words on separate lines
+ * are not accidentally concatenated.
+ */
+export function getSearchableText(items) {
+  let text = '';
+  for (const item of items || []) {
+    if (!item || typeof item.str !== 'string') continue;
+    text += item.str;
+    if (item.hasEOL) text += '\n';
+  }
+  return text;
+}
+
+/** Count matches in the text items returned by PDF.js. */
+export function countTextContentMatches(items, query, matchCase = false) {
+  return countMatches(getSearchableText(items), query, matchCase);
+}
+
+/** Gather text-layer span ranges in document order, preserving explicit BRs. */
+function collectTextLayerSegments(layer) {
+  const segments = [];
+  let text = '';
+  const showElement = layer.ownerDocument?.defaultView?.NodeFilter?.SHOW_ELEMENT ?? 1;
+  const walker = document.createTreeWalker(layer, showElement);
+  let node = walker.nextNode();
+  while (node) {
+    if (node.tagName === 'BR') {
+      text += '\n';
+    } else if (node.tagName === 'SPAN' && !node.querySelector('span')) {
+      const value = node.textContent || '';
+      const start = text.length;
+      text += value;
+      segments.push({ node, start, end: text.length, value });
+    }
+    node = walker.nextNode();
+  }
+  return { text, segments };
 }
 
 // ---------------------------------------------------------------------------
@@ -209,11 +295,7 @@ export class SearchController {
   async #countPageMatches(doc, pageNum, query) {
     const page = await doc.getPage(pageNum);
     const tc = await page.getTextContent();
-    let count = 0;
-    for (const item of tc.items) {
-      if (typeof item.str !== 'string' || !item.str) continue;
-      count += countMatches(item.str, query, this.matchCase);
-    }
+    const count = countTextContentMatches(tc.items, query, this.matchCase);
     try {
       page.cleanup();
     } catch (_) {
@@ -288,42 +370,52 @@ export class SearchController {
 
     const currentIndex =
       this.current && this.current.page === page ? this.current.index : -1;
-    let ordinal = 0; // match ordinal within this page
+    const { text, segments } = collectTextLayerSegments(tl);
+    const matches = findAllMatches(text, this.query, this.matchCase);
+    const rangesBySegment = segments.map(() => []);
 
-    // PDF.js v4 TextLayer emits one <span> per text item (+ <br> for EOL).
-    const spans = tl.querySelectorAll('span');
-    for (const span of spans) {
-      // Skip nested spans created by marked-content wrappers; only leaf
-      // spans that directly hold text are highlighted.
-      if (span.querySelector('span')) continue;
-      const text = span.textContent;
-      if (!text) continue;
-      const matches = findAllMatches(text, this.query, this.matchCase);
-      if (matches.length === 0) continue;
+    matches.forEach((match, ordinal) => {
+      if (!verifyMatch(text, match.index, match.length, this.query, this.matchCase)) return;
+      const matchEnd = match.index + match.length;
+      segments.forEach((segment, segmentIndex) => {
+        const start = Math.max(match.index, segment.start);
+        const end = Math.min(matchEnd, segment.end);
+        if (start < end) {
+          rangesBySegment[segmentIndex].push({
+            start: start - segment.start,
+            end: end - segment.start,
+            ordinal,
+          });
+        }
+      });
+    });
 
+    let currentMarked = false;
+    segments.forEach((segment, segmentIndex) => {
+      const ranges = rangesBySegment[segmentIndex];
+      if (!ranges.length) return;
       const frag = document.createDocumentFragment();
       let cursor = 0;
-      for (const m of matches) {
-        if (!verifyMatch(text, m.index, m.length, this.query, this.matchCase)) {
-          continue; // never wrap a misaligned range
-        }
-        if (m.index > cursor) {
-          frag.appendChild(document.createTextNode(text.slice(cursor, m.index)));
+      for (const range of ranges) {
+        if (range.start > cursor) {
+          frag.appendChild(document.createTextNode(segment.value.slice(cursor, range.start)));
         }
         const mark = document.createElement('mark');
         mark.className = 'search-highlight';
-        mark.textContent = text.slice(m.index, m.index + m.length);
-        if (ordinal === currentIndex) mark.classList.add('current');
-        ordinal += 1;
+        mark.textContent = segment.value.slice(range.start, range.end);
+        if (range.ordinal === currentIndex && !currentMarked) {
+          mark.classList.add('current');
+          currentMarked = true;
+        }
         frag.appendChild(mark);
-        cursor = m.index + m.length;
+        cursor = range.end;
       }
-      if (cursor < text.length) {
-        frag.appendChild(document.createTextNode(text.slice(cursor)));
+      if (cursor < segment.value.length) {
+        frag.appendChild(document.createTextNode(segment.value.slice(cursor)));
       }
-      span.textContent = '';
-      span.appendChild(frag);
-    }
+      segment.node.textContent = '';
+      segment.node.appendChild(frag);
+    });
 
     const current = tl.querySelector('mark.search-highlight.current');
     if (current && typeof current.scrollIntoView === 'function') {

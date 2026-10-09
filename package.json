@@ -11,12 +11,14 @@
     "samples:js": "node scripts/create-samples.js",
     "samples:unicode": "python3 scripts/create-unicode-samples.py",
     "samples:secure": "node scripts/create-secure-samples.js && python3 scripts/create-secure-samples.py",
-    "test": "node scripts/test-phase2.mjs && node scripts/test-phase2-dom.mjs && node scripts/test-phase3.mjs && node scripts/test-phase4.mjs && node scripts/test-phase5.mjs",
+    "samples:phase6": "python3 scripts/create-phase6-samples.py",
+    "test": "node scripts/test-phase2.mjs && node scripts/test-phase2-dom.mjs && node scripts/test-phase3.mjs && node scripts/test-phase4.mjs && node scripts/test-phase5.mjs && node scripts/test-phase6.mjs",
     "test:node": "node scripts/test-phase2.mjs",
     "test:dom": "node scripts/test-phase2-dom.mjs",
     "test:phase3": "node scripts/test-phase3.mjs",
     "test:phase4": "node scripts/test-phase4.mjs",
-    "test:phase5": "node scripts/test-phase5.mjs"
+    "test:phase5": "node scripts/test-phase5.mjs",
+    "test:phase6": "node scripts/test-phase6.mjs"
   },
   "author": "Cambuz",
   "license": "MIT",
@@ -26,8 +28,17 @@
     "pdfjs-dist": "^4.0.379"
   },
   "devDependencies": {
+    "@expo-google-fonts/noto-nastaliq-urdu": "^0.4.2",
+    "@expo-google-fonts/noto-sans-bengali": "^0.4.4",
     "@expo-google-fonts/noto-sans-devanagari": "^0.4.1",
+    "@expo-google-fonts/noto-sans-gujarati": "^0.4.2",
     "@expo-google-fonts/noto-sans-gurmukhi": "^0.4.1",
+    "@expo-google-fonts/noto-sans-kannada": "^0.4.3",
+    "@expo-google-fonts/noto-sans-malayalam": "^0.4.2",
+    "@expo-google-fonts/noto-sans-oriya": "^0.4.2",
+    "@expo-google-fonts/noto-sans-tamil": "^0.4.3",
+    "@expo-google-fonts/noto-sans-telugu": "^0.4.2",
+    "@napi-rs/canvas": "^1.0.10",
     "@pdf-lib/fontkit": "^1.1.1",
     "electron": "^28.0.0",
     "jsdom": "^30.1.2"
