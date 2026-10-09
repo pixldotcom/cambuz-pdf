@@ -22,6 +22,7 @@ import {
   formatBytes,
 } from './recents.js';
 import { PrintController } from './print-ui.js';
+import { PageToolsController } from './pdf-ops-ui.js';
 
 // PDF.js setup
 const pdfjsLib = await import('../node_modules/pdfjs-dist/build/pdf.mjs');
@@ -54,6 +55,7 @@ let documentGeneration = 0;
 let search = null;
 let sidebar = null;
 let printing = null;
+let pageTools = null;
 
 // --- DOM elements ---
 const elements = {
@@ -69,6 +71,7 @@ const elements = {
   btnOpen: document.getElementById('btn-open'),
   btnClose: document.getElementById('btn-close'),
   btnPrint: document.getElementById('btn-print'),
+  btnPageTools: document.getElementById('btn-pageops'),
   btnPrev: document.getElementById('btn-prev'),
   btnNext: document.getElementById('btn-next'),
   btnZoomIn: document.getElementById('btn-zoom-in'),
@@ -161,6 +164,7 @@ async function loadPDF(source, fileName, meta = {}) {
 
     // Swap in the new document only after PDF.js has opened the candidate.
     await printing?.onDocumentChanged();
+    await pageTools?.onDocumentChanged();
     if (pdfDoc) {
       try {
         await pdfDoc.destroy();
@@ -217,6 +221,7 @@ async function loadPDF(source, fileName, meta = {}) {
     elements.pageInput.disabled = false;
     elements.btnClose.disabled = false;
     elements.btnPrint.disabled = false;
+    elements.btnPageTools.disabled = false;
     elements.btnPrev.disabled = currentPage <= 1;
     elements.btnNext.disabled = currentPage >= totalPages;
     elements.btnZoomIn.disabled = false;
@@ -269,7 +274,9 @@ function fileNameFromUrl(url) {
 }
 
 function closePDF() {
+  if (!canReplaceDocument('Closing the document')) return;
   printing?.onDocumentChanged().catch(() => {});
+  pageTools?.onDocumentChanged().catch(() => {});
   originalPdfBytes = null;
   documentGeneration += 1;
   search.cancel();
@@ -328,6 +335,7 @@ function closePDF() {
   elements.zoomLevel.textContent = '100%';
   elements.btnClose.disabled = true;
   elements.btnPrint.disabled = true;
+  elements.btnPageTools.disabled = true;
   elements.btnPrev.disabled = true;
   elements.btnNext.disabled = true;
   elements.btnZoomIn.disabled = true;
@@ -717,6 +725,7 @@ function renderRecents() {
 }
 
 async function openRecent(entry) {
+  if (!canReplaceDocument('Opening this file')) return;
   try {
     if (isElectron() && entry.path) {
       const { buffer, size } = await readElectronFile(entry.path);
@@ -766,6 +775,66 @@ async function maybeReopenLast() {
   }
 }
 
+// --- Page tools (Phase 4) ---
+
+/** Returns false when the user keeps unsaved page edits and declines to discard them. */
+function canReplaceDocument(actionText) {
+  return pageTools ? pageTools.confirmDiscardIfDirty(actionText) : true;
+}
+
+/** Open a saved file (Save As result) in the viewer. */
+async function openSavedDocument({ bytes, name, path }) {
+  const copy = new Uint8Array(bytes).slice();
+  await loadPDF(copy.buffer, name, { path: path || undefined, size: copy.byteLength });
+}
+
+/** Files to merge into the working copy: native picker in Electron, file input in the browser. */
+async function pickPdfFilesForMerge() {
+  if (isElectron()) {
+    const paths = await window.cambuzAPI.openPdfPaths();
+    const files = [];
+    for (const filePath of paths || []) {
+      const { buffer, name, size } = await readElectronFile(filePath);
+      files.push({ name, bytes: new Uint8Array(buffer), size });
+    }
+    return files;
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,application/pdf';
+    input.multiple = true;
+    input.addEventListener('cancel', () => resolve([]));
+    input.onchange = async () => {
+      const files = await Promise.all(
+        [...input.files].map(async (file) => ({
+          name: file.name,
+          bytes: new Uint8Array(await file.arrayBuffer()),
+          size: file.size,
+        }))
+      );
+      resolve(files);
+    };
+    input.click();
+  });
+}
+
+function saveAsRequested() {
+  if (!pdfDoc) {
+    setStatus('Open a PDF before saving.');
+    return;
+  }
+  pageTools?.saveAs();
+}
+
+function duplicateRequested() {
+  if (!pdfDoc) {
+    setStatus('Open a PDF before duplicating it.');
+    return;
+  }
+  pageTools?.duplicate();
+}
+
 // --- Error Handling ---
 
 function showError(message) {
@@ -804,6 +873,7 @@ async function readElectronFile(filePath) {
 }
 
 async function openFile() {
+  if (!canReplaceDocument('Opening another file')) return;
   // Electron — native dialog + native file read.
   if (isElectron()) {
     try {
@@ -838,6 +908,7 @@ async function openFile() {
 }
 
 async function loadSample() {
+  if (!canReplaceDocument('Opening the sample')) return;
   await loadPDF('/samples/cambuz-demo.pdf', 'cambuz-demo.pdf');
 }
 
@@ -873,6 +944,9 @@ function setupDragDrop() {
     elements.dropOverlay.style.display = 'none';
 
     const files = e.dataTransfer.files;
+    if (files.length > 0 && !canReplaceDocument('Opening the dropped file')) {
+      return;
+    }
     if (files.length > 0) {
       const file = files[0];
       if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
@@ -912,6 +986,11 @@ function setupKeyboard() {
         toggleShortcuts(false);
         return;
       }
+      if (pageTools?.isOpen) {
+        e.preventDefault();
+        pageTools.close(true);
+        return;
+      }
       if (printing?.isOpen) {
         e.preventDefault();
         printing.close(true);
@@ -927,7 +1006,7 @@ function setupKeyboard() {
 
     // Keep shortcuts intended for the document behind the modal from leaking
     // through while the print settings/preview dialog is active.
-    if (printing?.isOpen) return;
+    if (printing?.isOpen || pageTools?.isOpen) return;
 
     if (key === 'F1') {
       e.preventDefault();
@@ -966,6 +1045,19 @@ function setupKeyboard() {
     if (mod && (key === 'o' || key === 'O')) {
       e.preventDefault();
       openFile();
+      return;
+    }
+
+    if (mod && e.shiftKey && (key === 'E' || key === 'e')) {
+      e.preventDefault();
+      if (pdfDoc) pageTools?.open();
+      else setStatus('Open a PDF before using page tools.');
+      return;
+    }
+
+    if (mod && e.shiftKey && (key === 'S' || key === 's')) {
+      e.preventDefault();
+      saveAsRequested();
       return;
     }
 
@@ -1177,7 +1269,19 @@ function setupEvents() {
     if (api.onMenuFullscreen) api.onMenuFullscreen(() => toggleFullscreen());
     if (api.onMenuSidebar) api.onMenuSidebar(() => pdfDoc && sidebar.toggle());
     if (api.onMenuShortcuts) api.onMenuShortcuts(() => toggleShortcuts(true));
+    if (api.onMenuPageTools) api.onMenuPageTools(() => pdfDoc && pageTools?.open());
+    if (api.onMenuSaveAs) api.onMenuSaveAs(() => saveAsRequested());
+    if (api.onMenuDuplicate) api.onMenuDuplicate(() => duplicateRequested());
   }
+
+  // Unsaved page edits live only in memory; warn before leaving the page.
+  // (Electron shows its own prompt via the main process's will-prevent-unload hook.)
+  window.addEventListener('beforeunload', (event) => {
+    if (pageTools?.isDirty) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
 }
 
 // --- Initialize ---
@@ -1215,6 +1319,18 @@ export function initApp() {
     getTotalPages: () => totalPages,
     getDocumentName: () => currentFileName,
     getDocumentGeneration: () => documentGeneration,
+    onStatus: (msg) => setStatus(msg),
+  });
+
+  pageTools = new PageToolsController({
+    pdfjsLib,
+    standardFontDataUrl: STANDARD_FONT_DATA_URL,
+    getSourceBytes: () => originalPdfBytes,
+    getDocumentName: () => currentFileName,
+    getDocumentGeneration: () => documentGeneration,
+    getCurrentFilePath: () => currentFilePath,
+    pickPdfFiles: pickPdfFilesForMerge,
+    onSaved: openSavedDocument,
     onStatus: (msg) => setStatus(msg),
   });
 

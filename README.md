@@ -2,11 +2,83 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 3 — Printing implemented; physical-printer verification pending<br>
+**Project status:** Phase 4 — Basic PDF utilities implemented and tested; physical-printer verification pending<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
 **Development approach:** Phase-by-phase, testable milestones
+
+---
+
+## Phase 4 — Implementation Status
+
+### Phase 4 Status: `BASIC PDF UTILITIES IMPLEMENTED — TESTED`
+
+Phase 4 adds a **Page Tools** dialog (toolbar *Pages* button, `Ctrl+Shift+E`,
+or File → Page Tools…). It works on a **working copy in memory**: nothing on
+disk changes until you choose **Save As**, and the original file is only
+overwritten if you pick it as the destination and confirm the overwrite.
+Reader features from Phases 1–3 are unchanged.
+
+| Requirement | Implementation |
+|---|---|
+| Rotate pages | ✅ ↺/↻ 90° on selected pages (adds to any existing `/Rotate`) |
+| Delete pages | ✅ Confirmation prompt; refuses to delete every page; Delete key |
+| Extract pages | ✅ "Extract selected" keeps only the selected pages (working copy); confirmation prompt |
+| Reorder pages | ✅ Move up / Move down for one or more selected pages |
+| Merge PDFs | ✅ "Merge PDF…" appends all pages of chosen files to the working copy |
+| Split PDFs | ✅ `1-3; 4-6` or `every N`; each part saved as `<name>-part-N.pdf`; working copy unchanged |
+| Save As | ✅ Native save dialog (Electron) or download (browser); reopens the saved file |
+| Duplicate document | ✅ Saves an identical copy of the file as it is on disk (unsaved edits excluded) |
+| Basic metadata | ✅ Title, author, subject, keywords (Info dictionary); creator/producer shown read-only |
+| Undo | ✅ Up to 20 steps until the document is closed; Discard changes restores the file as opened |
+| Protect the original | ✅ Save As never replaces the original without an explicit extra confirmation; writes go to a temporary file first, then rename |
+| Unsaved-change guard | ✅ Confirmation before opening/closing another file; window close asks in the desktop app and browser |
+| Encrypted PDFs | ✅ Refused with a clear message (password support is Phase 5) |
+
+### Implementation notes
+
+- `src/pdf-ops.js` — DOM-free operations built on `pdf-lib`. Each function returns
+  new bytes; the input is never mutated. Reorder, delete and extract work on the
+  same document's page tree, so the outline, named destinations and document
+  metadata survive them.
+- `src/pdf-ops-ui.js` — the dialog controller (thumbnails with PDF.js, selection,
+  undo history, confirmations, Save As / Duplicate / split saving).
+- `src/pdf-ops.css`, plus the dialog markup in `src/index.html`.
+- `main.js` / `preload.js` — `save-pdf` (single file, native dialog, overwrite
+  confirmation for existing files and the original), `save-pdf-files` (split into
+  a chosen folder, one batch confirmation for conflicts), `dialog-open-pdfs`
+  (merge picker), and a `will-prevent-unload` prompt for unsaved edits.
+- Browser builds save through downloads; split downloads each part in turn, so
+  the browser may ask permission to download several files.
+
+### Phase 4 verification status
+
+- `npm run test:phase4` — 133 assertions. Covers every operation on generated
+  PDFs and the samples: page order and count (checked by reopening output with
+  PDF.js), rotation placement, invalid input, encrypted-file refusal (fixture at
+  `scripts/fixtures/encrypted-password.pdf`), split plan parsing, metadata, Unicode
+  merge (Hindi), and the dialog controller in jsdom (confirmations, undo, Save As,
+  duplicate, split, cancel, overwrite reporting).
+- Browser run (headless Chromium against `npm run serve`, 33 checks): opening
+  with the keyboard shortcut, thumbnails, selection, rotate, undo, delete
+  confirmation, Save As download and reopen, split downloads, merge through a
+  file chooser, metadata, the unsaved-change prompt, Duplicate, and Discard. The
+  downloaded files were checked with `pdf-lib` (page counts, rotation, the
+  original left unchanged on disk).
+- **Not exercised:** the Electron desktop shell itself (no display or Electron
+  binary in this sandbox). The native Save/Open/folder dialogs, overwrite
+  prompts and the window-close prompt in `main.js` are reviewed but untested
+  at runtime. Verify them on Windows before release.
+
+### Known limitations (Phase 4)
+
+- Merge and split copy pages into new documents; outline/bookmarks, form fields
+  (AcroForm) and annotations are not carried over in those operations and were not verified.
+- Deleting or extracting pages can leave outline entries that point at removed pages.
+- Metadata editing covers the Info dictionary only (not XMP).
+- Undo history is kept in memory for the open document only.
+- Encrypted or password-protected PDFs cannot be opened for editing (Phase 5).
 
 ---
 
@@ -136,7 +208,7 @@ npm start
 # Generate all sample PDFs (basic + Unicode)
 npm run samples
 
-# Run the automated test suites (236 assertions)
+# Run the automated test suites (369 assertions)
 npm test
 ```
 
@@ -149,10 +221,11 @@ npm test
 | `npm run samples` | Generate all sample PDFs (JS + Python) |
 | `npm run samples:js` | Generate basic samples only |
 | `npm run samples:unicode` | Generate Unicode samples only (needs fpdf2) |
-| `npm test` | Run Node, DOM and Phase 3 print suites |
+| `npm test` | Run Node, DOM, Phase 3 print and Phase 4 page-tool suites |
 | `npm run test:node` | Run PDF/extraction/search/outline tests |
 | `npm run test:dom` | Run DOM tests (highlight/outline/recents/wiring) |
 | `npm run test:phase3` | Run print-range, layout, PDF-output and Ink Saver tests |
+| `npm run test:phase4` | Run page operation, merge/split, metadata and page-tools dialog tests |
 
 ### Keyboard Shortcuts
 
@@ -202,7 +275,8 @@ cambuz-pdf/
 │   ├── create-unicode-samples.py  # Hindi/Punjabi/multilingual PDFs (fpdf2)
 │   ├── test-phase2.mjs      # Node PDF/extraction/search suite
 │   ├── test-phase2-dom.mjs  # DOM/reader/print wiring suite (jsdom)
-│   └── test-phase3.mjs      # Print composition and validation suite
+│   ├── test-phase3.mjs      # Print composition and validation suite
+│   └── test-phase4.mjs      # Page operations, merge/split, metadata and page-tools dialog suite
 ├── samples/                 # Sample PDF files for testing
 │   ├── welcome.pdf          # 5-page welcome document
 │   ├── cambuz-demo.pdf      # 10-page comprehensive demo

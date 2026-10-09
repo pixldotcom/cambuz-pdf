@@ -22,4 +22,11 @@ contextBridge.exposeInMainWorld('cambuzAPI', {
   onMenuFullscreen: (callback) => ipcRenderer.on('menu-fullscreen', callback),
   onMenuSidebar: (callback) => ipcRenderer.on('menu-sidebar', callback),
   onMenuShortcuts: (callback) => ipcRenderer.on('menu-shortcuts', callback),
+  // Phase 4: page tools, Save As / Duplicate and merge/split file access.
+  openPdfPaths: () => ipcRenderer.invoke('dialog-open-pdfs'),
+  savePdf: (pdfBytes, options) => ipcRenderer.invoke('save-pdf', pdfBytes, options),
+  savePdfFiles: (files, options) => ipcRenderer.invoke('save-pdf-files', files, options),
+  onMenuPageTools: (callback) => ipcRenderer.on('menu-page-tools', callback),
+  onMenuSaveAs: (callback) => ipcRenderer.on('menu-save-as', callback),
+  onMenuDuplicate: (callback) => ipcRenderer.on('menu-duplicate', callback),
 });
