@@ -29,6 +29,7 @@ import { PasswordController } from './pdf-password-ui.js';
 import { FormController } from './pdf-forms-ui.js';
 import { SecurityController } from './pdf-security-ui.js';
 import { OcrController } from './pdf-ocr-ui.js';
+import { pageStatusMessage } from './text-selection.js';
 import {
   NO_SECURITY,
   classifyPasswordError,
@@ -582,7 +583,15 @@ async function renderPageNow(pageNum) {
     await renderTextLayer(page, viewport);
     if (!pdfDoc || tokenPage !== currentPage) return;
 
-    setStatus(`Page ${pageNum} of ${totalPages}`);
+    // Say why text cannot be selected here, rather than leaving a silent refusal.
+    setStatus(
+      pageStatusMessage({
+        pageNumber: pageNum,
+        totalPages,
+        hasText: elements.textLayer.textContent.trim().length > 0,
+        copyBlocked: isBlocked(documentSecurity, 'copy'),
+      })
+    );
     updateStatusMeta();
     sidebar.setActivePage(pageNum);
     if (sidebar.open) sidebar.scrollActiveIntoView();
@@ -1077,9 +1086,8 @@ function isElectron() {
   return !!window.cambuzAPI;
 }
 
-/** Read a native file via the Electron host. Returns { buffer, name, size }. */
-async function readElectronFile(filePath) {
-  const res = await window.cambuzAPI.readFile(filePath);
+/** The bytes of a successful host file-read result, as an ArrayBuffer. */
+function hostFileBuffer(res) {
   if (!res || !res.ok) {
     throw new Error((res && res.error) || 'Could not read file');
   }
@@ -1093,7 +1101,19 @@ async function readElectronFile(filePath) {
     buffer = new Uint8Array(data.data).buffer;
   }
   if (!buffer) throw new Error('Unexpected file data from host');
-  return { buffer, name: res.name, size: res.size };
+  return buffer;
+}
+
+/** Read a native file via the Electron host. Returns { buffer, name, size }. */
+async function readElectronFile(filePath) {
+  const res = await window.cambuzAPI.readFile(filePath);
+  return { buffer: hostFileBuffer(res), name: res.name, size: res.size };
+}
+
+/** Read a bundled sample via the Electron host. Returns { buffer, name, size }. */
+async function readElectronSample(fileName) {
+  const res = await window.cambuzAPI.readSample(fileName);
+  return { buffer: hostFileBuffer(res), name: res.name, size: res.size };
 }
 
 async function openFile() {
@@ -1132,16 +1152,36 @@ async function openFile() {
 }
 
 async function loadSample() {
-  if (!canReplaceDocument('Opening the sample')) return;
-  await loadPDF('/samples/cambuz-demo.pdf', 'cambuz-demo.pdf');
+  await openBundledSample('cambuz-demo.pdf');
 }
 
 /** The Phase 5 form sample — a PDF with real AcroForm fields. */
 async function loadFormSample() {
+  await openBundledSample('form-sample.pdf', { openForms: true });
+}
+
+/**
+ * Open one of the bundled sample PDFs.
+ *
+ * In Electron the page is loaded from file://, where a root-relative fetch such
+ * as fetch('/samples/…') resolves to the file-system root and fails, so the
+ * main process reads the sample and sends the bytes over IPC. In the browser
+ * preview the samples are ordinary static files next to the viewer.
+ */
+async function openBundledSample(fileName, meta = {}) {
   if (!canReplaceDocument('Opening the sample')) return;
-  await loadPDF('/samples/form-sample.pdf', 'form-sample.pdf', {
-    openForms: true,
-  });
+  try {
+    if (isElectron()) {
+      const { buffer, size } = await readElectronSample(fileName);
+      await loadPDF(buffer, fileName, { ...meta, size });
+    } else {
+      const url = new URL(`../samples/${fileName}`, import.meta.url).href;
+      await loadPDF(url, fileName, meta);
+    }
+  } catch (err) {
+    console.error('Sample open failed:', err);
+    showError(`Failed to open PDF: ${err.message}`);
+  }
 }
 
 // --- Drag and Drop ---

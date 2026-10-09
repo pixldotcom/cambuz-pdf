@@ -8,6 +8,7 @@
 // Usage: node scripts/check-packaged-app.mjs <path/to/app.asar>
 
 import fs from 'node:fs';
+import { BUNDLED_SAMPLES } from '../src/bundled-samples.cjs';
 
 const REQUIRED_FILES = [
   'main.js',
@@ -15,10 +16,13 @@ const REQUIRED_FILES = [
   'package.json',
   'src/index.html',
   'src/renderer.js',
+  'src/bundled-samples.cjs',
+  'src/context-menu.cjs',
+  'src/text-selection.js',
   'node_modules/pdfjs-dist/build/pdf.mjs',
   'node_modules/pdfjs-dist/build/pdf.worker.mjs',
   'node_modules/pdf-lib/dist/pdf-lib.esm.js',
-  'samples/cambuz-demo.pdf',
+  ...BUNDLED_SAMPLES.map((sample) => `samples/${sample}`),
 ];
 const REQUIRED_DIRECTORIES = ['node_modules/pdfjs-dist/standard_fonts'];
 

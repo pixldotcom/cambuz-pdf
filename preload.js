@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('cambuzAPI', {
   openFile: () => ipcRenderer.invoke('dialog-open-file'),
   readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
+  readSample: (name) => ipcRenderer.invoke('read-sample', name),
   getPrinters: () => ipcRenderer.invoke('list-printers'),
   printPdf: (pdfBytes, options) => ipcRenderer.invoke('print-pdf', pdfBytes, options),
   onMenuPrint: (callback) => ipcRenderer.on('menu-print', callback),

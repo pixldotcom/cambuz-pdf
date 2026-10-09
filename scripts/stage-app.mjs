@@ -17,6 +17,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BUNDLED_SAMPLES } from '../src/bundled-samples.cjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const stageDir = path.join(repoRoot, '.build-app');
@@ -24,7 +25,8 @@ const nodeModulesDir = path.join(stageDir, 'node_modules');
 
 const RUNTIME_FILES = ['main.js', 'preload.js', 'package-lock.json'];
 const RUNTIME_DIRS = ['src'];
-const RUNTIME_SAMPLES = ['cambuz-demo.pdf', 'form-sample.pdf'];
+// Every sample the welcome-screen buttons can open (src/bundled-samples.cjs).
+const RUNTIME_SAMPLES = BUNDLED_SAMPLES;
 // The renderer loads only PDF.js's build/ (non-legacy) and standard_fonts/. The
 // legacy builds, the web viewer assets and the TypeScript typings are not referenced.
 const PRUNE_DIRS = ['pdfjs-dist/legacy', 'pdfjs-dist/web', 'pdfjs-dist/types'];
