@@ -2,11 +2,133 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 4 — Basic PDF utilities implemented and tested; physical-printer verification pending<br>
+**Project status:** Phase 5 — Security and forms implemented and tested; Electron desktop shell and physical-printer verification pending<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
 **Development approach:** Phase-by-phase, testable milestones
+
+---
+
+## Phase 5 — Implementation Status
+
+### Phase 5 Status: `SECURITY AND FORMS IMPLEMENTED — TESTED`
+
+Phase 5 adds **password-protected documents**, **PDF permission enforcement** and
+**fillable PDF forms**. Reader, search, print and page-tool behaviour from
+Phases 1–4 is unchanged.
+
+| Requirement | Implementation |
+|---|---|
+| Password-protected PDFs | ✅ A prompt appears when a document needs one; the correct password opens it, a wrong one is reported and the document stays closed, Cancel leaves it locked |
+| Encrypted PDFs | ✅ Readable once unlocked. Never decrypted to disk and never re-saved unprotected — page tools and "Save Filled Form…" stay unavailable while a document is encrypted |
+| PDF permissions | ✅ All eight permission flags are read and listed in **Document Security…**; printing, copying, page changes and form filling are enforced in the UI |
+| Basic PDF forms | ✅ Text (single/multi-line), check boxes, radio groups, drop-downs and list boxes are drawn as real HTML controls over the page |
+| Form field interaction | ✅ Type, tick and choose directly on the page; filled/total counter, Reset, Tab navigation, per-field tooltips |
+| Saving filled forms | ✅ **Save Filled Form…** writes a NEW copy (native dialog in Electron, download in the browser); read-only and unsupported fields are skipped and reported |
+| Fail safely | ✅ Every refusal (encrypted, permission denied, unsupported field) shows a reason instead of doing nothing, and never works around the protection |
+
+### How it behaves
+
+- **Password prompt** — shown only when PDF.js reports a missing or incorrect
+  password. The password is handed to PDF.js for that one document and is never
+  stored, logged or written to disk.
+- **Document Security…** (toolbar lock button, status-bar chip or
+  `Ctrl+Shift+K`) lists every permission with *Allowed* / *Denied* and marks the
+  four Cambuz enforces: printing, copying, changing the document, and filling in
+  forms.
+- **Enforcement** — printing, `Ctrl+A` select-all and clipboard copying are
+  blocked when the document denies them; page tools stay disabled while a
+  document is encrypted; form filling is unavailable while a document is
+  encrypted or denies it. The text is still rendered and searchable.
+- **Form filling** (`Ctrl+Shift+F`, toolbar *Forms*, File → Fill Form Fields)
+  overlays real controls on the page at the exact field rectangles, at any zoom
+  or rotation. Values live in memory until you save; **Save Filled Form…**
+  writes a copy named `<document>-filled.pdf`. The file you opened is never
+  modified.
+- **Appearance streams** are rebuilt for the fields you change, so the values
+  are visible in other viewers too.
+
+### Implementation notes
+
+- `src/pdf-security.js` — permission flags (PDF 32000-1 table 22), the security
+  model, and classification of PDF.js password errors. DOM-free.
+- `src/pdf-forms.js` — AcroForm reading and writing with pdf-lib: field types,
+  options, flags, rectangles, per-field values, and a fill pass that returns new
+  bytes. DOM-free.
+- `src/pdf-password-ui.js` — the password prompt.
+- `src/pdf-forms-ui.js` — the on-page overlay, the filling bar, Reset and Save.
+- `src/pdf-security-ui.js` — the Document Security dialog and status-bar chip.
+- `src/pdf-forms.css` and the new markup in `src/index.html`.
+- `src/renderer.js` — the password retry loop, permission enforcement, the copy
+  guard, `Ctrl+Shift+F` / `Ctrl+Shift+K`, and the unsaved-form-value guard.
+- `src/printing.js` — encrypted documents are refused with a clear message
+  instead of failing inside pdf-lib.
+- `main.js` / `preload.js` — File → Fill Form Fields and File → Document
+  Security…. Saving reuses the Phase 4 `save-pdf` IPC, so overwrite protection
+  is unchanged.
+
+### Phase 5 verification status
+
+- `npm run test:phase5` — **268 assertions, all passing**:
+  - **A (25)** the permission model: mask decoding, encrypted/unencrypted,
+    every permission allowed/denied, status text, refusal messages, and
+    classification of the *real* PDF.js password exceptions.
+  - **B (35)** real encrypted fixtures opened with PDF.js: no password, wrong
+    password, correct password, the permission flags of all four fixtures, and
+    proof that refusals never touch the encrypted bytes.
+  - **C (61)** AcroForm reading (types, options, flags, pages, rectangles),
+    filling every supported type, verification of the saved PDF with **both**
+    pdf-lib and PDF.js (including rebuilt appearance streams), clearing values,
+    unknown options, control-character sanitising, dirty tracking, and the
+    `samples/form-sample.pdf` sample.
+  - **D (22)** the password dialog in jsdom: prompt, empty submit, Enter,
+    Cancel, reveal toggle, re-entrancy, reset.
+  - **E (58)** the form controller in jsdom against a real PDF.js viewport:
+    control types and positions per page, typing, counters, reset, save,
+    cancelled save, failed save, leave/re-enter, document swap, and every
+    refusal path.
+  - **F (15)** the Document Security dialog: unencrypted, fully locked and
+    partially restricted documents, badges, enforced markers, status chip.
+  - **G (52)** end-to-end through the real `renderer.js` in a DOM built from
+    `src/index.html`: password prompt → wrong password → correct password →
+    permissions applied, a permissions-only document (no prompt) refusing print
+    and copy, a fully locked document, and filling + saving the sample form with
+    `Ctrl+Shift+F`.
+- Fixtures: `scripts/fixtures/secure-*.pdf` are real RC4-128 (V2/R3) encrypted
+  PDFs generated with pypdf (`npm run samples:secure`; the password for the
+  protected fixtures is `cambuz`). `scripts/fixtures/acroform-basic.pdf` is a
+  two-page form with every supported field type plus a read-only field.
+- **Not exercised:** the Electron desktop shell (no display or Electron binary
+  in this sandbox), so the new File-menu entries, the native save dialog and the
+  native print route are reviewed but untested at runtime. The web build is
+  served by `npm run serve` for manual checks in a browser; this sandbox has no
+  browser, so canvas rendering, the on-page look of the form controls and
+  physical printing were **not** observed here and still need a human pass.
+  Also untested: real-world forms from other producers, XFA/dynamic forms and
+  signature fields.
+
+### Known limitations (Phase 5)
+
+- **Filled values are not printed.** A print job embeds the page graphics of the
+  source document; widget annotations (form values) are not flattened into it.
+  Save the filled form, open the saved copy and print that if you need the
+  values on paper.
+- **Encrypted documents are read-only.** Cambuz cannot write encrypted PDFs, so
+  page tools, metadata editing and saving a filled form are unavailable while a
+  document is encrypted. There is deliberately no "remove the password" action.
+- **Appearance fonts.** Rebuilt appearances use the standard Helvetica
+  (WinAnsi). Values outside that set (Devanagari, Gurmukhi, other scripts) are
+  still saved and are always visible in Cambuz's own overlay, but some other
+  viewers may only draw them once the field is focused.
+- **Unsupported form features:** XFA/dynamic forms, signature fields, push
+  buttons, JavaScript-driven fields, rich text, combo boxes with editable text,
+  and multi-select lists (a list box takes a single selection). Such fields are
+  listed in the overlay as read-only markers, never filled by guesswork.
+- **Search stays available when copying is denied.** Extraction for
+  accessibility is a separate permission; the clipboard is what gets blocked.
+- **Password attempts are not rate-limited by Cambuz**; the limit is whatever
+  the document's own encryption provides.
 
 ---
 
@@ -34,7 +156,7 @@ Reader features from Phases 1–3 are unchanged.
 | Undo | ✅ Up to 20 steps until the document is closed; Discard changes restores the file as opened |
 | Protect the original | ✅ Save As never replaces the original without an explicit extra confirmation; writes go to a temporary file first, then rename |
 | Unsaved-change guard | ✅ Confirmation before opening/closing another file; window close asks in the desktop app and browser |
-| Encrypted PDFs | ✅ Refused with a clear message (password support is Phase 5) |
+| Encrypted PDFs | ✅ Refused with a clear message — Phase 5 can *read* them with a password, but never edits or re-saves them |
 
 ### Implementation notes
 
@@ -78,7 +200,7 @@ Reader features from Phases 1–3 are unchanged.
 - Deleting or extracting pages can leave outline entries that point at removed pages.
 - Metadata editing covers the Info dictionary only (not XMP).
 - Undo history is kept in memory for the open document only.
-- Encrypted or password-protected PDFs cannot be opened for editing (Phase 5).
+- Encrypted or password-protected PDFs cannot be edited or saved as a filled form (Phase 5 reads them with a password; writing encrypted PDFs is not supported).
 
 ---
 
@@ -199,6 +321,9 @@ npm install
 # Optional: needed only to regenerate the Unicode sample PDFs
 pip install fpdf2 uharfbuzz
 
+# Optional: needed only to regenerate the Phase 5 encrypted fixtures
+pip install pypdf
+
 # Run as web application (for preview/testing)
 npm run serve
 
@@ -208,7 +333,10 @@ npm start
 # Generate all sample PDFs (basic + Unicode)
 npm run samples
 
-# Run the automated test suites (369 assertions)
+# Generate the Phase 5 fixtures (encrypted PDFs need pypdf)
+npm run samples:secure
+
+# Run the automated test suites (637 assertions)
 npm test
 ```
 
@@ -221,11 +349,13 @@ npm test
 | `npm run samples` | Generate all sample PDFs (JS + Python) |
 | `npm run samples:js` | Generate basic samples only |
 | `npm run samples:unicode` | Generate Unicode samples only (needs fpdf2) |
-| `npm test` | Run Node, DOM, Phase 3 print and Phase 4 page-tool suites |
+| `npm run samples:secure` | Generate Phase 5 fixtures (JS + Python, needs pypdf) |
+| `npm test` | Run Node, DOM, Phase 3 print, Phase 4 page-tool and Phase 5 security/form suites |
 | `npm run test:node` | Run PDF/extraction/search/outline tests |
 | `npm run test:dom` | Run DOM tests (highlight/outline/recents/wiring) |
 | `npm run test:phase3` | Run print-range, layout, PDF-output and Ink Saver tests |
 | `npm run test:phase4` | Run page operation, merge/split, metadata and page-tools dialog tests |
+| `npm run test:phase5` | Run password, permission, AcroForm, password-dialog, form-filling and security-dialog tests |
 
 ### Keyboard Shortcuts
 
@@ -250,6 +380,9 @@ npm test
 | `Ctrl+A` | Select all text on page |
 | `Ctrl+C` | Copy selected text |
 | `Ctrl+Shift+D` | Toggle dark/light theme |
+| `Ctrl+Shift+E` | Open page tools |
+| `Ctrl+Shift+F` | Fill in PDF form fields |
+| `Ctrl+Shift+K` | Document security and permissions |
 | `?` or `F1` | Keyboard shortcuts dialog |
 
 ### Project Structure
@@ -269,17 +402,28 @@ cambuz-pdf/
 │   ├── search.js            # Unicode search engine + highlighting
 │   ├── sidebar.js           # Thumbnails + document outline
 │   ├── recents.js           # Recent files + IndexedDB byte cache
+│   ├── pdf-security.js      # Permission flags and password-error classification
+│   ├── pdf-forms.js         # AcroForm reading and filling (pdf-lib)
+│   ├── pdf-password-ui.js   # Password prompt
+│   ├── pdf-forms-ui.js      # On-page form controls, filling bar, save
+│   ├── pdf-security-ui.js   # Document Security dialog + status chip
+│   ├── pdf-forms.css        # Password, security and form styling
 │   └── styles.css           # Reader styles (dark/light)
 ├── scripts/
 │   ├── create-samples.js    # Basic sample PDFs (pdf-lib)
 │   ├── create-unicode-samples.py  # Hindi/Punjabi/multilingual PDFs (fpdf2)
+│   ├── create-secure-samples.js   # AcroForm + secure fixtures (pdf-lib)
+│   ├── create-secure-samples.py   # Encrypted fixtures (pypdf)
 │   ├── test-phase2.mjs      # Node PDF/extraction/search suite
 │   ├── test-phase2-dom.mjs  # DOM/reader/print wiring suite (jsdom)
 │   ├── test-phase3.mjs      # Print composition and validation suite
-│   └── test-phase4.mjs      # Page operations, merge/split, metadata and page-tools dialog suite
+│   ├── test-phase4.mjs      # Page operations, merge/split, metadata and page-tools dialog suite
+│   └── test-phase5.mjs      # Security, permissions, forms and password-dialog suite
+├── scripts/fixtures/        # Encrypted and AcroForm test fixtures
 ├── samples/                 # Sample PDF files for testing
 │   ├── welcome.pdf          # 5-page welcome document
 │   ├── cambuz-demo.pdf      # 10-page comprehensive demo
+│   ├── form-sample.pdf      # 1-page fillable feedback form
 │   ├── hindi-sample.pdf     # 4-page Devanagari sample (पंजाब ×6)
 │   ├── punjabi-sample.pdf   # 4-page Gurmukhi sample (ਪੰਜਾਬ ×6)
 │   └── multilingual.pdf     # 7-page EN/HI/PA sample with outline (each term ×12)
@@ -341,8 +485,8 @@ correct shaping (verified by rasterizing pages to PNG).
   content box; per-printer non-printable margins are not queried automatically.
   Printers may clip at their hardware edges when `None` is selected.
 - **Annotations and interactive forms**: vector composition embeds page graphics;
-  annotations and interactive form widgets are not separately flattened into
-  the print job (forms are a later phase).
+  annotations and interactive form widgets are not flattened into the print job,
+  so filled form values do not appear on paper (see Phase 5 limitations).
 - **Ink Saver quality**: Ink Saver rasterizes at up to 200 dpi (with an
   18-megapixel-per-page safety cap); normal print jobs preserve vector content.
 - **Print preparation memory**: the active source PDF is retained for printing
@@ -358,7 +502,7 @@ correct shaping (verified by rasterizing pages to PNG).
   limitation — the reader decodes whatever `ToUnicode`/`ActualText` a PDF
   provides. Phase 6 will add real-world conjunct-heavy fixtures.
 - **Single page view**: one page at a time (continuous scroll still future)
-- **No page manipulation / passwords**: Phase 4–5 features
+- **No continuous scroll / no annotation authoring**: single page view; page operations and form filling are Phases 4–5 and are implemented
 - **Recent-file cache**: web-mode byte cache capped at 5 files × 60 MiB;
   larger/older files must be reopened manually
 - **Search**: case-insensitive substring search; no regex, no whole-word or
@@ -577,7 +721,7 @@ Cambuz PDF Reader
 - **No bookmarks**: Document outline/bookmarks are a Phase 2 feature
 - **At the Phase 1 milestone only**: printing was still a future Phase 3
   feature; the current workflow is documented at the top of this README
-- **No password support**: Encrypted PDFs are a Phase 5 feature
+- **Password support**: Encrypted PDFs were a Phase 5 feature; they are now opened with a password prompt (see the Phase 5 section)
 
 ### Tests Performed
 

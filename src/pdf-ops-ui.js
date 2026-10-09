@@ -734,6 +734,6 @@ export class PageToolsController {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 }

@@ -1,0 +1,340 @@
+/* Phase 5 — password prompt, document security dialog and form filling */
+
+/* ---------- Shared dialog shell (password + security) ---------- */
+
+.secure-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(10, 10, 18, 0.72);
+}
+
+.secure-dialog-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: min(760px, 100%);
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+.secure-dialog-narrow {
+  width: min(440px, 100%);
+}
+
+.secure-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.secure-dialog-header > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.secure-dialog-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.secure-doc-label {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.secure-dialog-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+}
+
+.secure-dialog-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.secure-dialog-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.secure-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.secure-dialog-body .secure-note + .secure-note {
+  margin-top: 8px;
+}
+
+.secure-message {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.secure-summary {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ---------- Password prompt ---------- */
+
+.secure-field {
+  display: block;
+}
+
+.secure-field > label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.secure-field input[type='password'],
+.secure-field input[type='text'] {
+  width: 100%;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.secure-field input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.secure-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.secure-inline-error {
+  min-height: 16px;
+  margin-top: 6px;
+  color: var(--error);
+  font-size: 12px;
+}
+
+/* ---------- Document security dialog ---------- */
+
+.secure-permissions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.secure-permissions-table th,
+.secure-permissions-table td {
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.secure-permissions-table thead th {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.secure-permissions-table tbody th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.secure-permissions-table td:last-child {
+  color: var(--text-secondary);
+}
+
+.secure-permissions-table tr.secure-denied th {
+  color: var(--error);
+}
+
+.secure-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.secure-badge-ok {
+  color: var(--bg-primary);
+  background: #a6e3a1;
+}
+
+.secure-badge-no {
+  color: #fff;
+  background: var(--error);
+}
+
+.secure-enforced {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.secure-empty {
+  color: var(--text-secondary);
+}
+
+#security-notes {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- Status bar lock chip ---------- */
+
+.status-lock {
+  display: none;
+  align-items: center;
+  padding: 1px 8px;
+  margin-right: 10px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.status-lock:hover {
+  background: var(--bg-hover);
+}
+
+/* ---------- Form filling bar ---------- */
+
+#form-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.form-bar-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+#form-bar-summary {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.form-bar-spacer {
+  flex: 1;
+}
+
+.form-bar-save {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* ---------- Form field overlay ---------- */
+
+#page-wrapper {
+  position: relative;
+}
+
+#form-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.form-widget {
+  position: absolute;
+  margin: 0;
+  padding: 0 3px;
+  color: #11121a;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(20, 30, 60, 0.55);
+  border-radius: 2px;
+  font-family: inherit;
+  line-height: 1.2;
+  pointer-events: auto;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.form-widget:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: #fff;
+}
+
+.form-widget:disabled {
+  background: rgba(240, 240, 245, 0.55);
+  color: #4a4a55;
+  cursor: not-allowed;
+}
+
+.form-widget-textarea {
+  padding: 2px 3px;
+  resize: none;
+  white-space: pre-wrap;
+}
+
+.form-widget-checkbox,
+.form-widget-radio {
+  display: block;
+  padding: 0;
+  accent-color: #2a4fb7;
+}
+
+.form-widget-static {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #3a3f52;
+  background: rgba(255, 255, 255, 0.35);
+  border: 1px dashed rgba(20, 30, 60, 0.6);
+  font-size: 10px;
+  text-align: center;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* ---------- Copy protection ---------- */
+
+.textLayer.no-copy,
+.textLayer.no-copy * {
+  user-select: none;
+  -webkit-user-select: none;
+}

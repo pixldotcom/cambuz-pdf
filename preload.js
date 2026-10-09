@@ -29,4 +29,7 @@ contextBridge.exposeInMainWorld('cambuzAPI', {
   onMenuPageTools: (callback) => ipcRenderer.on('menu-page-tools', callback),
   onMenuSaveAs: (callback) => ipcRenderer.on('menu-save-as', callback),
   onMenuDuplicate: (callback) => ipcRenderer.on('menu-duplicate', callback),
+  // Phase 5: forms and document security.
+  onMenuForms: (callback) => ipcRenderer.on('menu-forms', callback),
+  onMenuSecurity: (callback) => ipcRenderer.on('menu-security', callback),
 });
