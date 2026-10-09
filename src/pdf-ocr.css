@@ -1,0 +1,245 @@
+/* Phase 7 — optional, local, explicitly requested page OCR */
+
+.ocr-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 125;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(10, 10, 18, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.ocr-dialog-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: min(850px, 100%);
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+.ocr-dialog-header,
+.ocr-dialog-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 18px;
+  background: var(--bg-secondary);
+}
+
+.ocr-dialog-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.ocr-dialog-header > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.ocr-dialog-header h2 {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.ocr-document-label {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ocr-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+}
+
+.ocr-intro,
+.ocr-footer-note,
+.ocr-help,
+.ocr-result-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ocr-intro {
+  margin-bottom: 13px;
+}
+
+.ocr-engine-status {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ocr-engine-status[data-state="ready"] {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.ocr-engine-status[data-state="unavailable"] {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--error) 50%, var(--border));
+}
+
+.ocr-language-field label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+#ocr-languages {
+  display: block;
+  width: 100%;
+  min-height: 140px;
+  padding: 6px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+}
+
+#ocr-languages:focus,
+.ocr-output:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 1px;
+}
+
+#ocr-languages option {
+  padding: 3px 6px;
+}
+
+.ocr-help {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ocr-error {
+  min-height: 0;
+  margin-top: 8px;
+  color: var(--error);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ocr-error:empty {
+  display: none;
+}
+
+.ocr-result {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.ocr-result-label {
+  margin-bottom: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ocr-result-note {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+
+.ocr-output {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  max-height: 320px;
+  resize: vertical;
+  padding: 10px;
+  user-select: text;
+  -webkit-user-select: text;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.ocr-dialog-footer {
+  align-items: center;
+  border-top: 1px solid var(--border);
+}
+
+.ocr-footer-note {
+  max-width: 380px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ocr-dialog-actions {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#btn-ocr-run,
+#btn-ocr-refresh {
+  min-height: 36px;
+  padding: 7px 13px;
+  font-size: 12px;
+}
+
+#btn-ocr-run:disabled,
+#btn-ocr-refresh:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (max-width: 640px) {
+  .ocr-dialog-overlay {
+    padding: 8px;
+  }
+
+  .ocr-dialog-panel {
+    max-height: calc(100% - 8px);
+  }
+
+  .ocr-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ocr-footer-note {
+    max-width: none;
+  }
+
+  .ocr-dialog-actions {
+    width: 100%;
+  }
+
+  .ocr-dialog-actions > button {
+    flex: 1;
+    justify-content: center;
+  }
+}

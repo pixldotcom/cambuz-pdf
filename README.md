@@ -2,11 +2,99 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 6 — Indian-language compatibility fixtures and automated reader/print checks implemented; OS clipboard, Electron and physical-printer verification pending<br>
+**Project status:** Phase 7 — optional, local OCR UI/IPC and raster-only language fixtures implemented. OCR needs a separately installed Tesseract 4+ engine and language data; this sandbox has no native Tesseract/Electron runtime, so desktop CLI integration remains pending a Windows check.<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
 **Development approach:** Phase-by-phase, testable milestones
+
+---
+
+## Phase 7 — Optional OCR
+
+### Phase 7 status: `OPTIONAL LOCAL OCR IMPLEMENTED; NATIVE DESKTOP CHECK PENDING`
+
+OCR is an explicit, optional action for the **current page**. The reader never
+starts OCR automatically. In the desktop app, the OCR dialog checks for a local
+Tesseract 4+ command and the language data installed on the machine; a user must
+choose one to three installed languages and press **Recognize current page**.
+The page is rasterized locally (up to 300 dpi, bounded at 8,000 pixels per side
+and 16 megapixels) and passed to the local `tesseract` executable through a
+restricted Electron IPC bridge. The image is limited to 20 MiB and an OCR
+operation is stopped after two minutes.
+
+Recognized text is displayed in a separate selectable OCR result box, labelled
+with page, language and engine version. It is **not embedded in the source PDF,
+not merged into PDF.js's native text layer, and not included in normal document
+search or printing**. Users can select/copy the OCR result from its box. OCR is
+unavailable when document permissions deny copying, matching the existing
+Phase 5 restriction. Results are temporary and are not stored or uploaded.
+
+The desktop OCR adapter is separate from PDF.js text extraction and uses only
+Node's built-in `child_process`/filesystem APIs. No OCR executable, traineddata,
+new npm runtime dependency, auto-download or network service is bundled. Web
+preview mode explains that it cannot access the desktop OCR engine.
+
+**Languages:** `eng`, `hin`, `pan`, `urd`, `ben`, `guj`, `mar`, `tam`, `tel`,
+`kan`, `mal`, `ori` and `asm` (English, Hindi, Punjabi, Urdu, Bengali, Gujarati,
+Marathi, Tamil, Telugu, Kannada, Malayalam, Odia and Assamese). Only languages
+reported by the local engine are selectable. Indic recognition quality depends
+on the separately installed model, scan quality, layout and script; the list
+is an available-engine matrix, not a guarantee of perfect recognition.
+
+### Installing the optional OCR engine
+
+Cambuz does not install or download Tesseract. Install a trusted Tesseract 4 or
+newer build separately, include the language data you need, and make the
+`tesseract` executable available on `PATH`. In a new terminal,
+`tesseract --version` should report version 4 or newer and
+`tesseract --list-langs` should list selected codes such as `eng`, `hin`,
+`pan` or `urd`. Restart Cambuz after changing PATH or language data, open a PDF,
+choose **OCR**, and use **Check OCR again** to refresh the detected language
+packs. On Windows, use a trusted Windows Tesseract build and its language-data
+selection; on Linux/macOS, use the distribution's package manager and review
+that package's notices. Cambuz does not require network access while recognizing
+text.
+
+### Dependencies, licensing and size
+
+- Cambuz adds **no Tesseract engine or model bytes** to the base package and
+  adds no OCR npm dependency. The Electron main process calls the separately
+  installed local CLI with a fixed argument list; it does not invoke a shell.
+- Tesseract OCR is distributed upstream under Apache-2.0. Official upstream
+  Tesseract language-data repositories also publish Apache-2.0 model data;
+  downstream installers and third-party packs may have additional notices.
+  Because Cambuz redistributes neither, users should review the license and
+  notices for the engine/model packages they choose.
+- The actual installed size of a native engine plus selected language models
+  varies by platform, build and models. It was **not measured here** because no
+  native OCR package is installed. The project has no completed installer in
+  this checkout, so an installer-size delta cannot be reported; the base app
+  includes no OCR binary or traineddata. The checked-in scanned PDF is a small
+  327 KiB test/sample asset, not an application runtime dependency.
+
+### Phase 7 verification and limitations
+
+- `npm run samples:phase7` generates `samples/phase7-scanned.pdf`, a four-page
+  image-only sample (English, Hindi, Punjabi and Urdu), plus the corresponding
+  raster PNG fixtures used by quality tests. PDF.js confirms all four pages
+  contain no native selectable text.
+- `npm run test:phase7` — **54 passed, 0 failed, 2 skipped** in the default
+  sandbox because no native Tesseract executable is installed. Through the
+  same `execFile` adapter, a temporary Tesseract-compatible shim backed by
+  Tesseract.js 7 WebAssembly plus `eng`/`hin`/`pan`/`urd` data completed **58
+  passed, 0 failed, 0 skipped**; the English, Hindi, Punjabi and Urdu scan
+  assertions exercised actual recognition output. No shim or OCR package is
+  checked in or added to the application dependencies.
+- `npm test` — **920 passed, 0 failed, 2 skipped** across the Phase 2–7 suites.
+- **Still not verified here:** the native Tesseract executable itself, actual
+  Electron IPC/window launch, Windows packaging, and a Windows UI session. The
+  WebAssembly adapter check validates the same OCR call contract and controlled
+  scan quality, but is not a native-CLI or Windows integration test.
+- OCR is current-page-only and does not create a searchable PDF. Whole-document
+  OCR, OCR-layer export, progress/cancel controls, handwriting, tables and
+  automatic orientation correction remain out of scope. The native engine and
+  language packages still need functional verification on a Windows desktop.
 
 ---
 
@@ -58,8 +146,9 @@ fallback render path completes in this Node environment.
 - `npm run test:phase6` — **229 assertions, all passing**. It uses the real
   `SearchController`, PDF.js `TextLayer`, PDF.js extraction/rasterization,
   `@napi-rs/canvas`, and the production `buildPrintPdf` path.
-- `npm test` — **866 assertions, all passing** across the existing Phase 2–5
-  regression suites and the new Phase 6 suite (123 + 59 + 54 + 133 + 268 + 229).
+- Before Phase 7, the Phase 2–6 regression suites totaled 866 assertions
+  (123 + 59 + 54 + 133 + 268 + 229). The current combined Phase 2–7 result is
+  reported in the Phase 7 section above.
 - `npm run samples:phase6` regenerates all three PDFs. Generation requires the
   development Noto font packages plus Python `fpdf2`, `uharfbuzz`, `fonttools`
   and `pypdf` (installation instructions below).
@@ -414,6 +503,9 @@ pip install fpdf2 uharfbuzz fonttools pypdf
 # Regenerate Phase 6 multilingual and missing-font fixtures
 npm run samples:phase6
 
+# Generate the Phase 7 raster-only English/Hindi/Punjabi/Urdu OCR sample
+npm run samples:phase7
+
 # Optional: needed only to regenerate the Phase 5 encrypted fixtures
 pip install pypdf
 
@@ -429,7 +521,7 @@ npm run samples
 # Generate the Phase 5 fixtures (encrypted PDFs need pypdf)
 npm run samples:secure
 
-# Run the automated test suites (866 assertions across Phases 2–6)
+# Run the automated test suites (Phase 2–7 regression and OCR tests)
 npm test
 ```
 
@@ -444,13 +536,15 @@ npm test
 | `npm run samples:unicode` | Generate Unicode samples only (needs fpdf2) |
 | `npm run samples:secure` | Generate Phase 5 fixtures (JS + Python, needs pypdf) |
 | `npm run samples:phase6` | Generate multilingual, embedded-font and missing-font fixtures (Python + Noto dev fonts) |
-| `npm test` | Run Node, DOM, Phase 3 print, Phase 4 page-tool, Phase 5 security/form and Phase 6 language suites |
+| `npm run samples:phase7` | Generate a raster-only English/Hindi/Punjabi/Urdu OCR sample and PNG test images |
+| `npm test` | Run the complete Phase 2–7 regression, language and optional OCR suites |
 | `npm run test:node` | Run PDF/extraction/search/outline tests |
 | `npm run test:dom` | Run DOM tests (highlight/outline/recents/wiring) |
 | `npm run test:phase3` | Run print-range, layout, PDF-output and Ink Saver tests |
 | `npm run test:phase4` | Run page operation, merge/split, metadata and page-tools dialog tests |
 | `npm run test:phase5` | Run password, permission, AcroForm, password-dialog, form-filling and security-dialog tests |
 | `npm run test:phase6` | Run extraction, grapheme-safe search, selection/copy-payload, rendering, missing-font and print-PDF tests across English and twelve target languages |
+| `npm run test:phase7` | Test OCR input safety, page rasterization, scanned-PDF text separation, optional-engine detection, permissions and real OCR quality when Tesseract/model packs are installed |
 
 ### Keyboard Shortcuts
 
@@ -484,7 +578,7 @@ npm test
 
 ```
 cambuz-pdf/
-├── main.js                  # Electron menus, file IPC, printers and native print
+├── main.js                  # Electron menus, file IPC, printers, print and OCR adapters
 ├── preload.js               # Narrow Electron IPC bridge
 ├── server.js                # Express web server for preview
 ├── package.json             # Project configuration
@@ -502,7 +596,11 @@ cambuz-pdf/
 │   ├── pdf-password-ui.js   # Password prompt
 │   ├── pdf-forms-ui.js      # On-page form controls, filling bar, save
 │   ├── pdf-security-ui.js   # Document Security dialog + status chip
+│   ├── pdf-ocr.js           # Bounded page-to-PNG OCR rasterizer + language list
+│   ├── pdf-ocr-ui.js        # Explicit per-page OCR dialog and separate results
+│   ├── ocr-engine.cjs       # Optional local Tesseract adapter (not bundled)
 │   ├── pdf-forms.css        # Password, security and form styling
+│   ├── pdf-ocr.css          # OCR dialog styling
 │   └── styles.css           # Reader styles (dark/light)
 ├── scripts/
 │   ├── create-samples.js    # Basic sample PDFs (pdf-lib)
@@ -510,13 +608,15 @@ cambuz-pdf/
 │   ├── create-secure-samples.js   # AcroForm + secure fixtures (pdf-lib)
 │   ├── create-secure-samples.py   # Encrypted fixtures (pypdf)
 │   ├── create-phase6-samples.py   # HarfBuzz-shaped Indian-language fixtures
+│   ├── create-phase7-samples.mjs  # Raster-only English/Indic OCR sample
 │   ├── test-phase2.mjs      # Node PDF/extraction/search suite
 │   ├── test-phase2-dom.mjs  # DOM/reader/print wiring suite (jsdom)
 │   ├── test-phase3.mjs      # Print composition and validation suite
 │   ├── test-phase4.mjs      # Page operations, merge/split, metadata and page-tools dialog suite
 │   ├── test-phase5.mjs      # Security, permissions, forms and password-dialog suite
-│   └── test-phase6.mjs      # Indian-language extraction, UI, raster and print tests
-├── scripts/fixtures/        # Encrypted and AcroForm test fixtures
+│   ├── test-phase6.mjs      # Indian-language extraction, UI, raster and print tests
+│   └── test-phase7.mjs      # Optional OCR safety, scanned fixtures and quality checks
+├── scripts/fixtures/        # Security/form fixtures and Phase 7 raster PNGs
 ├── samples/                 # Sample PDF files for testing
 │   ├── welcome.pdf          # 5-page welcome document
 │   ├── cambuz-demo.pdf      # 10-page comprehensive demo
@@ -526,7 +626,8 @@ cambuz-pdf/
 │   ├── multilingual.pdf     # 7-page EN/HI/PA sample with outline (each term ×12)
 │   ├── phase6-indian-languages.pdf # English + 12 target languages, mixed, stress
 │   ├── phase6-embedded-font.pdf    # Visible Tamil text with embedded Noto font
-│   └── phase6-missing-font.pdf     # Tamil with its embedded font program removed
+│   ├── phase6-missing-font.pdf     # Tamil with its embedded font program removed
+│   └── phase7-scanned.pdf          # Four image-only English/Hindi/Punjabi/Urdu pages
 ├── assets/                  # Application assets
 └── README.md                # This file
 ```
@@ -625,7 +726,7 @@ Node suite (`npm run test:node`, 123 assertions):
 7. Metadata (title/author) present
 8. Rotation viewport math (90° swaps dimensions, 180° preserves)
 9. Syntax check (`node --check`) on all application and test JS sources
-10. Phase 3 print IPC/layout hooks present; no Phase-4+ utilities, OCR or telemetry
+10. Phase 3 print IPC/layout hooks remain present; the optional OCR engine stays in a separate module
 11. Recents pure helpers (ids, sizes, relative time)
 
 DOM suite (`npm run test:dom`, 59 assertions, jsdom + real modules):
@@ -649,9 +750,9 @@ Print suite (`npm run test:phase3`, 54 assertions):
 5. Hindi and Punjabi content survives vector composition; page /Rotate is retained
 6. Ink Saver passes grayscale PNG pages into a valid output PDF
 
-Server checks (curl, HTTP 200 with expected MIME types): `/src/index.html`,
-`/src/print.css`, `/src/print-ui.js`, `/src/printing.js`, `pdf-lib` ESM,
-PDF.js ESM and `samples/welcome.pdf`.
+Server checks cover `/src/index.html`, `/src/print.css`, `/src/print-ui.js`,
+`/src/pdf-ocr.css`, `/src/pdf-ocr-ui.js`, `/src/printing.js`, PDF.js ESM and
+`samples/phase7-scanned.pdf`.
 
 Native Electron/Windows printer behavior and browser canvas-preview appearance
 still require the manual checklist below; they are not asserted as hardware-tested.
@@ -673,6 +774,24 @@ verify native printer enumeration and driver output.
   combining marks, mixed scripts and Urdu output on paper/PDF.
 - Repeat on the target browser and Windows/Electron builds; the automated
   Node/jsdom suite is not a substitute for native clipboard/printer testing.
+
+**Phase 7 OCR checks (desktop app + separately installed Tesseract):**
+
+- Verify `tesseract --version` and that `tesseract --list-langs` lists each
+  installed model code. Open `samples/phase7-scanned.pdf`; its text layer should
+  be empty, unlike selectable text in `samples/phase6-indian-languages.pdf`.
+- Run OCR explicitly on pages 1–4 with `eng`, `hin`, `pan` and `urd` (install
+  those models first). Compare OCR output with the visible page and confirm the
+  separate OCR result is selectable but does not enter normal Search or save
+  back into the PDF.
+- Repeat with a PDF whose permission flags deny copying; the OCR button/action
+  must remain blocked. Also check missing engine/model status, the **Check OCR
+  again** control, a mixed-language selection, large/skewed scans and a slow
+  OCR run. Confirm no page is processed until **Recognize current page** is
+  clicked.
+- Use the web preview to verify that it explains local OCR is desktop-only.
+  The Node/jsdom suite and the controlled Tesseract.js model probe do not replace
+  native Tesseract/Windows/Electron verification.
 
 1. Open `samples/multilingual.pdf` via Open, drag-and-drop and `?pdf=` URL
 2. Sidebar thumbnails/bookmarks, Unicode search, copy/select-all, rotation,
