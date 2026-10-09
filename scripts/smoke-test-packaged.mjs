@@ -226,16 +226,18 @@ async function main() {
     const escaped = String(message).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
     console.log(`::${level} title=${title}::${escaped}`);
   };
+  // Failures are annotated one by one. Passing checks are published together, in a
+  // single summary annotation at the end: GitHub keeps only about ten annotations per
+  // step, which would otherwise hide most of the checks.
   const record = (name, pass, detail = '') => {
     report.checks.push({ name, pass: Boolean(pass), detail: String(detail) });
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
-    annotate(pass ? 'notice' : 'error', 'Smoke check', `${pass ? 'PASS' : 'FAIL'}: ${name}${detail ? ` — ${detail}` : ''}`);
+    if (!pass) annotate('error', 'Smoke check failed', `${name}${detail ? ` — ${detail}` : ''}`);
     return Boolean(pass);
   };
   const note = (name, detail) => {
     report.informational[name] = String(detail);
     console.log(`INFO  ${name}: ${detail}`);
-    annotate('warning', 'Informational', `${name}: ${detail}`);
   };
   const capped = (list, text) => {
     if (list.length < 50) list.push(String(text).slice(0, 500));
@@ -672,6 +674,18 @@ async function main() {
     report.finishedAt = new Date().toISOString();
     report.passed = report.checks.length > 0 && report.checks.every((check) => check.pass);
     fs.writeFileSync(path.join(outDir, 'smoke-test-result.json'), `${JSON.stringify(report, null, 2)}\n`);
+    if (inCi) {
+      const passedCount = report.checks.filter((check) => check.pass).length;
+      const lines = [
+        ...report.checks.map((check) => `${check.pass ? 'PASS' : 'FAIL'}  ${check.name}${check.detail ? ` — ${check.detail}` : ''}`),
+        ...Object.entries(report.informational).map(([name, detail]) => `INFO  ${name}: ${detail}`),
+      ];
+      annotate(
+        report.passed ? 'notice' : 'error',
+        'Smoke test summary',
+        `${report.app} (${report.platform}): ${passedCount} of ${report.checks.length} checks passed\n${lines.join('\n')}`,
+      );
+    }
     try {
       ws?.close();
     } catch {
