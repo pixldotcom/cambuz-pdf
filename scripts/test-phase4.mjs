@@ -119,7 +119,7 @@ section('A1. Input handling and encrypted-file refusal');
   );
   await rejects(
     () => rotatePages(encrypted, [1], 90),
-    'cannot be edited yet',
+    'pages cannot be changed',
     'rotate refuses encrypted input instead of altering it'
   );
   await rejects(

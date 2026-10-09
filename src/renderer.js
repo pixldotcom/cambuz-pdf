@@ -2,7 +2,9 @@
 // Handles PDF loading, rendering (canvas + selectable text layer),
 // navigation, zoom, rotation, search, sidebar, recents and UI events.
 //
-// Phase 1 and 2 functionality is preserved; Phase 3 adds print preparation and preview.
+// Phase 1 and 2 functionality is preserved; Phase 3 adds print preparation and
+// preview, Phase 4 the page tools, and Phase 5 password-protected documents,
+// PDF permissions and fillable forms.
 
 import { SearchController } from './search.js';
 import { SidebarController } from './sidebar.js';
@@ -23,6 +25,17 @@ import {
 } from './recents.js';
 import { PrintController } from './print-ui.js';
 import { PageToolsController } from './pdf-ops-ui.js';
+import { PasswordController } from './pdf-password-ui.js';
+import { FormController } from './pdf-forms-ui.js';
+import { SecurityController } from './pdf-security-ui.js';
+import {
+  NO_SECURITY,
+  classifyPasswordError,
+  isBlocked,
+  passwordErrorMessage,
+  readDocumentSecurity,
+  refusalMessage,
+} from './pdf-security.js';
 
 // PDF.js setup
 const pdfjsLib = await import('../node_modules/pdfjs-dist/build/pdf.mjs');
@@ -52,10 +65,20 @@ let currentRecentId = null;
 let originalPdfBytes = null; // stable copy retained for print preparation
 let documentGeneration = 0;
 
+// Phase 5: security state of the open document and the viewport of the page
+// that is currently on screen (used to place form fields over it).
+let documentSecurity = NO_SECURITY;
+let openedWithPassword = false;
+let lastViewport = null;
+let lastViewportPage = 0;
+
 let search = null;
 let sidebar = null;
 let printing = null;
 let pageTools = null;
+let passwordPrompt = null;
+let forms = null;
+let securityUi = null;
 
 // --- DOM elements ---
 const elements = {
@@ -72,6 +95,8 @@ const elements = {
   btnClose: document.getElementById('btn-close'),
   btnPrint: document.getElementById('btn-print'),
   btnPageTools: document.getElementById('btn-pageops'),
+  btnForms: document.getElementById('btn-forms'),
+  btnSecurity: document.getElementById('btn-security'),
   btnPrev: document.getElementById('btn-prev'),
   btnNext: document.getElementById('btn-next'),
   btnZoomIn: document.getElementById('btn-zoom-in'),
@@ -81,6 +106,7 @@ const elements = {
   btnTheme: document.getElementById('btn-theme'),
   btnWelcomeOpen: document.getElementById('btn-welcome-open'),
   btnSample: document.getElementById('btn-sample'),
+  btnSampleForm: document.getElementById('btn-sample-form'),
   btnErrorDismiss: document.getElementById('btn-error-dismiss'),
   pageInput: document.getElementById('page-input'),
   pageTotal: document.getElementById('page-total'),
@@ -89,6 +115,7 @@ const elements = {
   statusText: document.getElementById('status-text'),
   statusFile: document.getElementById('status-file'),
   statusMeta: document.getElementById('status-meta'),
+  statusLock: document.getElementById('status-lock'),
   themeIconDark: document.getElementById('theme-icon-dark'),
   themeIconLight: document.getElementById('theme-icon-light'),
   // Phase 2
@@ -135,36 +162,65 @@ function updateStatusMeta() {
 
 // --- PDF Loading ---
 
+/**
+ * Open bytes with PDF.js, asking for a password whenever the document needs
+ * one. Resolves with null when the user cancels: a protected PDF is never
+ * opened without the password, and a wrong password is never worked around.
+ */
+async function openWithPassword(bytes, fileName) {
+  let password = '';
+  for (;;) {
+    try {
+      // PDF.js transfers the buffer to its worker, so hand it a fresh copy on
+      // every attempt — a retry cannot reuse detached memory.
+      const doc = await pdfjsLib.getDocument({
+        data: bytes.slice(),
+        password,
+        standardFontDataUrl: STANDARD_FONT_DATA_URL,
+      }).promise;
+      openedWithPassword = Boolean(password);
+      return doc;
+    } catch (error) {
+      const kind = classifyPasswordError(error);
+      if (!kind) throw error;
+      setStatus('This PDF is protected and needs a password.');
+      const answer = await passwordPrompt.request({
+        fileName,
+        message: passwordErrorMessage(kind, fileName),
+      });
+      if (answer === null) return null;
+      password = answer;
+    }
+  }
+}
+
 async function loadPDF(source, fileName, meta = {}) {
   try {
-    let data;
     let stableBytes;
 
     if (source instanceof ArrayBuffer) {
-      data = source;
       stableBytes = new Uint8Array(source).slice();
     } else if (ArrayBuffer.isView(source)) {
-      data = source;
       stableBytes = new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
     } else if (typeof source === 'string') {
       setStatus('Loading document…');
       const response = await fetch(source);
       if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.status}`);
-      data = await response.arrayBuffer();
-      stableBytes = new Uint8Array(data).slice();
+      stableBytes = new Uint8Array(await response.arrayBuffer());
     } else {
       throw new Error('Invalid PDF source');
     }
 
-    const loadingTask = pdfjsLib.getDocument({
-      data,
-      standardFontDataUrl: STANDARD_FONT_DATA_URL,
-    });
-    const doc = await loadingTask.promise;
+    const doc = await openWithPassword(stableBytes, fileName);
+    if (!doc) {
+      setStatus('Open cancelled — the document was not opened.');
+      return;
+    }
 
     // Swap in the new document only after PDF.js has opened the candidate.
     await printing?.onDocumentChanged();
     await pageTools?.onDocumentChanged();
+    await forms?.onDocumentChanged();
     if (pdfDoc) {
       try {
         await pdfDoc.destroy();
@@ -174,6 +230,8 @@ async function loadPDF(source, fileName, meta = {}) {
     }
     pdfDoc = doc;
     originalPdfBytes = stableBytes;
+    // Phase 5: read the permission flags before anything else can act on them.
+    documentSecurity = await readDocumentSecurity(doc, { unlockedWithPassword: openedWithPassword });
     documentGeneration += 1;
     totalPages = pdfDoc.numPages;
     currentFileName = fileName || fileNameFromUrl(typeof source === 'string' ? source : '') || 'Document';
@@ -233,6 +291,9 @@ async function loadPDF(source, fileName, meta = {}) {
     elements.btnRotateCcw.disabled = false;
     elements.btnRotateCw.disabled = false;
 
+    // Phase 5: enforce the permissions this document carries.
+    applyDocumentAvailability();
+
     // Show viewer, hide welcome.
     elements.welcomeScreen.style.display = 'none';
     elements.pdfViewer.style.display = 'flex';
@@ -244,7 +305,8 @@ async function loadPDF(source, fileName, meta = {}) {
     elements.statusFile.textContent = sizeLabel
       ? `${currentFileName} • ${sizeLabel}`
       : currentFileName;
-    setStatus(`Loaded — ${totalPages} page${totalPages !== 1 ? 's' : ''}`);
+    const securityNote = documentSecurity.encrypted ? ' • encrypted' : '';
+    setStatus(`Loaded — ${totalPages} page${totalPages !== 1 ? 's' : ''}${securityNote}`);
 
     // Sidebar content.
     await sidebar.openDocument(pdfDoc);
@@ -256,6 +318,13 @@ async function loadPDF(source, fileName, meta = {}) {
     updateZoomDisplay();
     updateStatusMeta();
     await renderPage(currentPage);
+
+    // The form sample opens straight into form filling so the feature is
+    // visible without hunting for the button.
+    if (meta.openForms) {
+      forms?.enable();
+    }
+
     renderRecents();
   } catch (err) {
     console.error('PDF load error:', err);
@@ -277,7 +346,13 @@ function closePDF() {
   if (!canReplaceDocument('Closing the document')) return;
   printing?.onDocumentChanged().catch(() => {});
   pageTools?.onDocumentChanged().catch(() => {});
+  forms?.onDocumentChanged().catch(() => {});
+  passwordPrompt?.reset();
   originalPdfBytes = null;
+  documentSecurity = NO_SECURITY;
+  openedWithPassword = false;
+  lastViewport = null;
+  lastViewportPage = 0;
   documentGeneration += 1;
   search.cancel();
   search.clear();
@@ -346,8 +421,99 @@ function closePDF() {
   elements.btnSearch.disabled = true;
   elements.btnRotateCcw.disabled = true;
   elements.btnRotateCw.disabled = true;
+  elements.textLayer.classList.remove('no-copy');
 
+  applyDocumentAvailability();
   renderRecents();
+}
+
+// --- Phase 5: document security and permissions ----------------------------
+
+/** Enable/disable every entry point, then apply the document's permissions. */
+function applyDocumentAvailability() {
+  const available = Boolean(pdfDoc);
+  pageTools?.setDocumentAvailable(available);
+  forms?.setDocumentAvailable(available);
+  securityUi?.setDocumentAvailable(available);
+  applySecurityRestrictions();
+}
+
+/**
+ * Honour the permission flags of the open document. Restrictions are enforced
+ * here rather than deep inside the features, so a refused action always has a
+ * visible reason instead of silently failing later.
+ */
+function applySecurityRestrictions() {
+  const available = Boolean(pdfDoc);
+
+  const printBlocked = isBlocked(documentSecurity, 'print');
+  elements.btnPrint.disabled = !available || printBlocked;
+  elements.btnPrint.title = printBlocked
+    ? refusalMessage(documentSecurity, 'print')
+    : 'Print PDF (Ctrl+P)';
+
+  // Page tools need to rewrite the file, which is impossible while it is
+  // encrypted — whatever the permission flags say. Say so up front.
+  const editBlocked = Boolean(documentSecurity.encrypted) || isBlocked(documentSecurity, 'modifyContents');
+  elements.btnPageTools.disabled = !available || editBlocked;
+  elements.btnPageTools.title = editBlocked
+    ? documentSecurity.encrypted
+      ? 'Page tools are not available while the document is encrypted.'
+      : refusalMessage(documentSecurity, 'modifyContents')
+    : 'Page Tools — rotate, delete, extract, reorder, merge, split (Ctrl+Shift+E)';
+
+  // Copying is blocked at the layer level: the text still renders (and can be
+  // searched) but it cannot be selected or copied out.
+  elements.textLayer.classList.toggle('no-copy', isBlocked(documentSecurity, 'copy'));
+
+  securityUi?.updateChip(documentSecurity);
+  forms?.setDocumentAvailable(available);
+}
+
+/** Open print preview — unless the document forbids printing. */
+function openPrint() {
+  if (!pdfDoc) {
+    setStatus('Open a PDF before printing.');
+    return;
+  }
+  if (isBlocked(documentSecurity, 'print')) {
+    const message = refusalMessage(documentSecurity, 'print');
+    setStatus(message);
+    showError(message);
+    return;
+  }
+  printing?.open();
+}
+
+/** Open page tools — unless the document forbids changing it. */
+function openPageTools() {
+  if (!pdfDoc) {
+    setStatus('Open a PDF before using page tools.');
+    return;
+  }
+  if (documentSecurity.encrypted) {
+    const message =
+      'Page tools are not available while this document is encrypted. Open a copy that is not protected to edit its pages.';
+    setStatus(message);
+    showError(message);
+    return;
+  }
+  if (isBlocked(documentSecurity, 'modifyContents')) {
+    const message = refusalMessage(documentSecurity, 'modifyContents');
+    setStatus(message);
+    showError(message);
+    return;
+  }
+  pageTools?.open();
+}
+
+/** Toggle form filling, reporting why it is unavailable when it is. */
+function toggleForms() {
+  if (!pdfDoc) {
+    setStatus('Open a PDF before filling in a form.');
+    return;
+  }
+  forms?.toggle();
 }
 
 // --- Rendering (canvas + selectable text layer) ---
@@ -393,6 +559,13 @@ async function renderPageNow(pageNum) {
     elements.pageWrapper.style.width = `${w}px`;
     elements.pageWrapper.style.height = `${h}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Remember the viewport and place the form fields before the (potentially
+    // slow) canvas render: the overlay only needs the geometry, and it then
+    // stays correct even if the page itself cannot be drawn.
+    lastViewport = viewport;
+    lastViewportPage = pageNum;
+    forms?.renderOverlay(pageNum, viewport);
 
     await page.render({ canvasContext: ctx, viewport }).promise;
     if (!pdfDoc || tokenPage !== currentPage) return;
@@ -578,6 +751,11 @@ async function toggleFullscreen() {
 
 function selectPageText() {
   if (!pdfDoc) return;
+  if (isBlocked(documentSecurity, 'copy')) {
+    const message = refusalMessage(documentSecurity, 'copy');
+    setStatus(message);
+    return;
+  }
   const layer = elements.textLayer;
   if (!layer || !layer.textContent || !layer.textContent.trim()) {
     setStatus('No selectable text on this page (it may be a scanned image)');
@@ -777,9 +955,46 @@ async function maybeReopenLast() {
 
 // --- Page tools (Phase 4) ---
 
-/** Returns false when the user keeps unsaved page edits and declines to discard them. */
+/** Returns false when the user keeps unsaved edits and declines to discard them. */
 function canReplaceDocument(actionText) {
-  return pageTools ? pageTools.confirmDiscardIfDirty(actionText) : true;
+  if (pageTools?.isDirty) return pageTools.confirmDiscardIfDirty(actionText);
+  // Phase 5: values typed into a form live in memory until they are saved.
+  if (forms?.isDirty) {
+    return window.confirm(
+      `You have unsaved form values. ${actionText} will discard them. Continue?`
+    );
+  }
+  return true;
+}
+
+/** True while anything is unsaved, for the leave-page guard. */
+function hasUnsavedWork() {
+  return Boolean(pageTools?.isDirty || forms?.isDirty);
+}
+
+/** Save the filled form: native dialog in Electron, download in the browser. */
+async function saveFilledFormBytes(bytes, suggestedName) {
+  if (isElectron()) {
+    return window.cambuzAPI.savePdf(bytes, {
+      suggestedName,
+      originalPath: currentFilePath || '',
+    });
+  }
+  downloadPdfBytes(bytes, suggestedName);
+  return { ok: true, name: suggestedName, path: null };
+}
+
+function downloadPdfBytes(bytes, name) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  // Window-scoped so the timer dies with the page instead of outliving it.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 /** Open a saved file (Save As result) in the viewer. */
@@ -912,6 +1127,14 @@ async function loadSample() {
   await loadPDF('/samples/cambuz-demo.pdf', 'cambuz-demo.pdf');
 }
 
+/** The Phase 5 form sample — a PDF with real AcroForm fields. */
+async function loadFormSample() {
+  if (!canReplaceDocument('Opening the sample')) return;
+  await loadPDF('/samples/form-sample.pdf', 'form-sample.pdf', {
+    openForms: true,
+  });
+}
+
 // --- Drag and Drop ---
 
 let dragCounter = 0;
@@ -981,9 +1204,19 @@ function setupKeyboard() {
 
     // Escape always closes transient UI (dialog first, then search).
     if (key === 'Escape') {
+      if (passwordPrompt?.isOpen) {
+        e.preventDefault();
+        passwordPrompt.cancel();
+        return;
+      }
       if (elements.shortcutsDialog.style.display !== 'none') {
         e.preventDefault();
         toggleShortcuts(false);
+        return;
+      }
+      if (securityUi?.isOpen) {
+        e.preventDefault();
+        securityUi.hide();
         return;
       }
       if (pageTools?.isOpen) {
@@ -994,6 +1227,11 @@ function setupKeyboard() {
       if (printing?.isOpen) {
         e.preventDefault();
         printing.close(true);
+        return;
+      }
+      if (forms?.isEnabled) {
+        e.preventDefault();
+        forms.disable();
         return;
       }
       if (elements.searchBar.style.display !== 'none') {
@@ -1028,7 +1266,8 @@ function setupKeyboard() {
       return;
     }
 
-    if (mod && (key === 'f' || key === 'F')) {
+    // Ctrl+F is search; Ctrl+Shift+F (Phase 5) is form filling.
+    if (mod && !e.shiftKey && (key === 'f' || key === 'F')) {
       e.preventDefault();
       toggleSearch(true);
       return;
@@ -1050,8 +1289,22 @@ function setupKeyboard() {
 
     if (mod && e.shiftKey && (key === 'E' || key === 'e')) {
       e.preventDefault();
-      if (pdfDoc) pageTools?.open();
-      else setStatus('Open a PDF before using page tools.');
+      openPageTools();
+      return;
+    }
+
+    // Phase 5: toggle form filling.
+    if (mod && e.shiftKey && (key === 'F' || key === 'f')) {
+      e.preventDefault();
+      toggleForms();
+      return;
+    }
+
+    // Phase 5: document security dialog.
+    if (mod && e.shiftKey && (key === 'K' || key === 'k')) {
+      e.preventDefault();
+      if (pdfDoc) securityUi?.toggle();
+      else setStatus('Open a PDF to see its security settings.');
       return;
     }
 
@@ -1063,8 +1316,7 @@ function setupKeyboard() {
 
     if (mod && (key === 'p' || key === 'P')) {
       e.preventDefault();
-      if (pdfDoc) printing?.open();
-      else setStatus('Open a PDF before printing.');
+      openPrint();
       return;
     }
 
@@ -1165,6 +1417,7 @@ function setupEvents() {
   elements.btnOpen.addEventListener('click', openFile);
   elements.btnWelcomeOpen.addEventListener('click', openFile);
   elements.btnSample.addEventListener('click', loadSample);
+  elements.btnSampleForm?.addEventListener('click', loadFormSample);
   elements.btnClose.addEventListener('click', closePDF);
   elements.btnPrev.addEventListener('click', prevPage);
   elements.btnNext.addEventListener('click', nextPage);
@@ -1192,6 +1445,25 @@ function setupEvents() {
   });
   elements.chkReopenLast.addEventListener('change', () => {
     setReopenLast(elements.chkReopenLast.checked);
+  });
+
+  // Phase 5: refuse to hand the page text to the clipboard when the document
+  // denies copying. The text still renders and stays searchable.
+  elements.textLayer.addEventListener('copy', (event) => {
+    if (isBlocked(documentSecurity, 'copy')) {
+      event.preventDefault();
+      const message = refusalMessage(documentSecurity, 'copy');
+      setStatus(message);
+      showError(message);
+    }
+  });
+
+  // The status-bar lock chip is a button as well as a label.
+  elements.statusLock.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      securityUi?.show();
+    }
   });
 
   // Page input
@@ -1254,7 +1526,7 @@ function setupEvents() {
     const api = window.cambuzAPI;
     if (api.onMenuOpenFile) api.onMenuOpenFile(() => openFile());
     if (api.onMenuCloseFile) api.onMenuCloseFile(() => closePDF());
-    if (api.onMenuPrint) api.onMenuPrint(() => pdfDoc && printing?.open());
+    if (api.onMenuPrint) api.onMenuPrint(() => openPrint());
     if (api.onMenuZoomIn) api.onMenuZoomIn(() => zoomIn());
     if (api.onMenuZoomOut) api.onMenuZoomOut(() => zoomOut());
     if (api.onMenuFitPage) api.onMenuFitPage(() => fitToPage());
@@ -1269,15 +1541,18 @@ function setupEvents() {
     if (api.onMenuFullscreen) api.onMenuFullscreen(() => toggleFullscreen());
     if (api.onMenuSidebar) api.onMenuSidebar(() => pdfDoc && sidebar.toggle());
     if (api.onMenuShortcuts) api.onMenuShortcuts(() => toggleShortcuts(true));
-    if (api.onMenuPageTools) api.onMenuPageTools(() => pdfDoc && pageTools?.open());
+    if (api.onMenuPageTools) api.onMenuPageTools(() => openPageTools());
     if (api.onMenuSaveAs) api.onMenuSaveAs(() => saveAsRequested());
     if (api.onMenuDuplicate) api.onMenuDuplicate(() => duplicateRequested());
+    if (api.onMenuForms) api.onMenuForms(() => toggleForms());
+    if (api.onMenuSecurity) api.onMenuSecurity(() => pdfDoc && securityUi?.show());
   }
 
-  // Unsaved page edits live only in memory; warn before leaving the page.
-  // (Electron shows its own prompt via the main process's will-prevent-unload hook.)
+  // Unsaved page edits and form values live only in memory; warn before
+  // leaving the page. (Electron shows its own prompt via the main process's
+  // will-prevent-unload hook.)
   window.addEventListener('beforeunload', (event) => {
-    if (pageTools?.isDirty) {
+    if (hasUnsavedWork()) {
       event.preventDefault();
       event.returnValue = '';
     }
@@ -1331,6 +1606,31 @@ export function initApp() {
     getCurrentFilePath: () => currentFilePath,
     pickPdfFiles: pickPdfFilesForMerge,
     onSaved: openSavedDocument,
+    onStatus: (msg) => setStatus(msg),
+  });
+
+  passwordPrompt = new PasswordController({
+    onStatus: (msg) => setStatus(msg),
+  });
+
+  forms = new FormController({
+    getSourceBytes: () => originalPdfBytes,
+    getDocumentGeneration: () => documentGeneration,
+    getDocumentName: () => currentFileName,
+    getCurrentPage: () => currentPage,
+    getCurrentViewport: () =>
+      lastViewport && lastViewportPage === currentPage
+        ? { pageNumber: lastViewportPage, viewport: lastViewport }
+        : null,
+    getSecurity: () => documentSecurity,
+    saveBytes: saveFilledFormBytes,
+    onSaved: openSavedDocument,
+    onStatus: (msg) => setStatus(msg),
+  });
+
+  securityUi = new SecurityController({
+    getSecurity: () => documentSecurity,
+    getDocumentName: () => currentFileName,
     onStatus: (msg) => setStatus(msg),
   });
 

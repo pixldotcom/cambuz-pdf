@@ -84,6 +84,17 @@ function createWindow() {
         },
         { type: 'separator' },
         {
+          label: 'Fill Form Fields',
+          accelerator: 'CmdOrCtrl+Shift+F',
+          click: () => mainWindow.webContents.send('menu-forms'),
+        },
+        {
+          label: 'Document Security…',
+          accelerator: 'CmdOrCtrl+Shift+K',
+          click: () => mainWindow.webContents.send('menu-security'),
+        },
+        { type: 'separator' },
+        {
           label: 'Exit',
           accelerator: 'CmdOrCtrl+Q',
           click: () => app.quit(),

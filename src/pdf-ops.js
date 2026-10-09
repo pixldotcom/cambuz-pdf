@@ -27,8 +27,10 @@ function toUint8Array(input) {
 }
 
 /**
- * Parse PDF bytes for editing. Encrypted/password-protected files are refused
- * (password support belongs to Phase 5), so they are never silently altered.
+ * Parse PDF bytes for editing. Encrypted/password-protected files are refused,
+ * so they are never silently altered: reading them with a password is Phase 5,
+ * but saving an edited or filled copy would mean removing their protection,
+ * which Cambuz does not do.
  */
 export async function loadEditablePdf(input) {
   const { PDFDocument } = await pdfLib();
@@ -43,7 +45,8 @@ export async function loadEditablePdf(input) {
     const message = String(error?.message || '');
     if (error?.name === 'EncryptedPDFError' || /encrypted/i.test(message)) {
       throw new Error(
-        'This PDF is password-protected or encrypted. It cannot be edited yet; password support arrives in Phase 5.'
+        'This PDF is password-protected or encrypted. It can be read with its password, but pages ' +
+          'cannot be changed and a filled form cannot be saved while it stays encrypted.'
       );
     }
     throw new Error(`This file is not a readable PDF: ${message || 'unknown error'}`);

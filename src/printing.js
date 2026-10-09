@@ -314,7 +314,19 @@ export async function buildPrintPdf({
   } = pdfLib;
 
   onProgress({ stage: 'Preparing', progress: 0 });
-  const sourcePdf = await PDFDocument.load(bytes);
+  let sourcePdf;
+  try {
+    sourcePdf = await PDFDocument.load(bytes);
+  } catch (error) {
+    // Phase 5: never attempt to work around encryption. A protected document
+    // can be read, but printing it would mean rewriting it, so refuse clearly.
+    if (error?.name === 'EncryptedPDFError' || /encrypted/i.test(String(error?.message || ''))) {
+      throw new Error(
+        'This PDF is encrypted. Cambuz can display it, but a print job cannot be prepared from a protected document.'
+      );
+    }
+    throw new Error(`This PDF could not be prepared for printing: ${error.message || 'unknown error'}`);
+  }
   const actualPageCount = sourcePdf.getPageCount();
   if (pageCount !== undefined && Number(pageCount) !== actualPageCount) {
     throw new Error('The PDF changed while the print dialog was open. Close and reopen the print preview.');
