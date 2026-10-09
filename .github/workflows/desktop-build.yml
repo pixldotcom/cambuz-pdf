@@ -7,7 +7,11 @@ name: Desktop builds
 
 on:
   push:
+    paths-ignore:
+      - '**.md'
   pull_request:
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
 
 permissions:
@@ -24,14 +28,14 @@ env:
 jobs:
   test:
     name: Regression tests (Linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       # Tests run without the Electron binary; packaging jobs download it.
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -44,8 +48,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -58,20 +62,21 @@ jobs:
       - name: Write SHA-256 checksums
         shell: pwsh
         run: |
-          $lines = Get-ChildItem dist -File |
-            Where-Object { $_.Name -like '*-setup.exe' -or $_.Name -like '*-portable.exe' } |
-            ForEach-Object {
-              $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLower()
-              $mib = [math]::Round($_.Length / 1MB, 1)
-              Write-Output "::notice title=Build output::$($_.Name) - $mib MiB - SHA-256 $hash"
-              "$hash  $($_.Name)"
-            }
-          $lines | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -like '*-setup.exe' -or $_.Name -like '*-portable.exe' }
+          $sums = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLower()
+            $mib = [math]::Round($file.Length / 1MB, 1)
+            Write-Host "::notice title=Build output::$($file.Name) - $mib MiB - SHA-256 $hash"
+            "$hash  $($file.Name)"
+          }
+          $sums | Set-Content -Encoding ascii dist/SHA256SUMS.txt
           Get-Content dist/SHA256SUMS.txt
+          $malformed = Get-Content dist/SHA256SUMS.txt | Where-Object { $_ -notmatch '^[0-9a-f]{64}  \S' }
+          if ($malformed) { throw "Malformed SHA256SUMS.txt lines: $($malformed -join '; ')" }
           $appAsar = Get-Item dist/win-unpacked/resources/app.asar
-          Write-Output "::notice title=Build output::app.asar (renderer payload) — $([math]::Round($appAsar.Length / 1MB, 1)) MiB"
+          Write-Host "::notice title=Build output::app.asar (renderer payload) - $([math]::Round($appAsar.Length / 1MB, 1)) MiB"
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cambuz-pdf-windows-x64
           path: |
@@ -106,7 +111,7 @@ jobs:
           node scripts/smoke-test-packaged.mjs --app $portable.FullName --out smoke/portable --port 9333 --timeout 180
       - name: Upload smoke-test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-test-evidence-windows-x64
           path: smoke/
@@ -116,12 +121,12 @@ jobs:
   linux-x64:
     name: Linux x64 (AppImage) — experimental
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -139,7 +144,7 @@ jobs:
             echo "::notice title=Build output::$f — $(awk -v b=$(stat -c %s "$f") 'BEGIN{printf "%.1f MiB", b/1048576}') — $(sha256sum "$f" | cut -d' ' -f1)"
           done
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cambuz-pdf-linux-x64
           path: |
@@ -153,7 +158,7 @@ jobs:
         run: xvfb-run -a node scripts/smoke-test-packaged.mjs --app dist/linux-unpacked/cambuz-pdf-reader --arg --no-sandbox --out smoke/linux --port 9335 --timeout 180
       - name: Upload smoke-test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-test-evidence-linux-x64
           path: smoke/
@@ -167,8 +172,8 @@ jobs:
     timeout-minutes: 45
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -186,7 +191,7 @@ jobs:
             echo "::notice title=Build output::$f — $(awk -v b=$(stat -f %z "$f") 'BEGIN{printf "%.1f MiB", b/1048576}') — $(shasum -a 256 "$f" | cut -d' ' -f1)"
           done
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cambuz-pdf-macos-arm64
           path: |

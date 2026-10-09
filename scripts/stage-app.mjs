@@ -25,7 +25,8 @@ const nodeModulesDir = path.join(stageDir, 'node_modules');
 const RUNTIME_FILES = ['main.js', 'preload.js', 'package-lock.json'];
 const RUNTIME_DIRS = ['src'];
 const RUNTIME_SAMPLES = ['cambuz-demo.pdf', 'form-sample.pdf'];
-// Only the non-legacy PDF.js build, its standard fonts and CMaps are loaded by the renderer.
+// The renderer loads only PDF.js's build/ (non-legacy) and standard_fonts/. The
+// legacy builds, the web viewer assets and the TypeScript typings are not referenced.
 const PRUNE_DIRS = ['pdfjs-dist/legacy', 'pdfjs-dist/web', 'pdfjs-dist/types'];
 
 function removeFilesMatching(dir, predicate) {

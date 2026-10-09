@@ -10,6 +10,146 @@
 
 ---
 
+## Desktop packaging — Windows x64 build (Phase 9 groundwork)
+
+### Packaging status: `WINDOWS X64 INSTALLER AND PORTABLE BUILT AND SMOKE-TESTED IN CI; LINUX AND macOS EXPERIMENTAL; UNSIGNED; NOT RELEASED`
+
+Packaging was audited before Phase 8. No application behaviour was changed to
+make it build: the work added electron-builder, a staging step, two checker
+scripts and a CI workflow. Phase 8 has not started.
+
+| Target | Command | Output in `dist/` | Verified in CI (`Desktop builds`) |
+| --- | --- | --- | --- |
+| Windows x64 | `npm run build:win` | `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` (NSIS installer); `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` (single file); `win-unpacked/Cambuz PDF Reader.exe` | Built; silent install, smoke test of the installed app, and silent uninstall passed; smoke tests of the unpacked and portable builds passed |
+| Linux x64 | `npm run build:linux` | `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage`; `linux-unpacked/cambuz-pdf-reader` | Built; smoke test of the unpacked build under Xvfb passed (with `--no-sandbox`); the AppImage itself was not launched |
+| macOS arm64 | `npm run build:mac` | `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg`; `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | Built and contents verified; not launched; unsigned and not notarized |
+
+Measured sizes from CI (`Build output` notices): AppImage 105.5 MiB; DMG 96.6 MiB;
+ZIP 93.3 MiB. The Windows installer and portable sizes are listed under
+*Measured sizes* below. The renderer payload (`app.asar`) is about 19 MB (18.8 MiB)
+before compression; most of each installer is Electron's own runtime.
+
+Artifact formats: Windows NSIS installer (per-user by default, can change the install
+folder, Start-menu shortcut, uninstaller) and a portable executable
+that extracts itself at launch; Linux AppImage; macOS DMG and ZIP containing an
+unsigned `.app`. Each job uploads `SHA256SUMS.txt` next to the files.
+
+#### Building locally
+
+```bash
+npm ci              # downloads the Electron runtime for your OS
+npm run build:win   # or build:linux / build:mac on the matching OS
+```
+
+Packaging needs the Electron runtime download, which restricted networks may
+block; `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci` is enough for the tests but not
+for packaging. Always build through the `build:*` scripts. They run
+`scripts/stage-app.mjs` first (see *How the package is built*).
+
+Checks that can be run on a build:
+
+```bash
+node scripts/check-packaged-app.mjs dist/win-unpacked/resources/app.asar
+npm run test:packaged -- --app "dist/win-unpacked/Cambuz PDF Reader.exe" --out smoke-test-output
+```
+
+`check-packaged-app.mjs` reads the asar header and fails if a required renderer
+file is missing or if development-only payloads (tests, scripts, the Electron
+toolchain, the Node-only `@napi-rs/canvas` binding, source maps, PDF.js legacy
+and viewer builds) were packaged. `test:packaged` starts the executable with
+Chromium's remote-debugging port, drops `samples/cambuz-demo.pdf` into the real
+window, and checks the title, the preload bridge, the page count, the rendered
+canvas and the text layer. It writes a screenshot, the app log and a JSON report.
+
+#### How the package is built
+
+- `scripts/stage-app.mjs` copies only the runtime files (`main.js`, `preload.js`,
+  `src/`, two sample PDFs) to `.build-app/` and installs production dependencies
+  from the lockfile with `--omit=dev --omit=optional --ignore-scripts`. It then
+  removes the PDF.js legacy, viewer and typings folders and all source maps. The
+  result is about 21 MiB on disk before compression.
+- electron-builder packages `.build-app/` (`directories.app`), not the project
+  root. This matters: while measuring the build, electron-builder hard-linked
+  the project's `package.json` into its staging area and rewrote it, which
+  removed the `scripts`, `devDependencies` and `build` sections of the working
+  copy. Packaging the staged copy keeps the project file untouched; check
+  `git status` after any packaging run.
+- `@napi-rs/canvas` is pulled in by `pdfjs-dist` as an optional dependency. It is
+  a Node-only native binding (roughly 37 MiB unpacked for win32 x64), and the
+  renderer never loads it, so the staged build leaves it out.
+- `productName` is `Cambuz PDF Reader` both in `build` and in `package.json`, so
+  the packaged app and `npm start` use the same name. Consequence: the
+  per-user data folder for `npm start` is now `Cambuz PDF Reader`, not
+  `cambuz-pdf`, and recent-file entries from earlier development runs do not
+  carry over.
+
+#### Continuous integration
+
+`.github/workflows/desktop-build.yml` runs on every push and pull request:
+
+- `test` (Ubuntu): `npm test` — the regression suites must pass first.
+- `windows-x64` (gating, Windows Server): build; verify packaged contents; write
+  `SHA256SUMS.txt`; upload `cambuz-pdf-windows-x64` *before* any runtime check;
+  smoke-test the unpacked build; install the NSIS installer silently into a temp
+  folder, smoke-test the installed app, uninstall silently and confirm removal;
+  smoke-test the portable executable; upload `smoke-test-evidence-windows-x64`.
+- `linux-x64` (experimental, `continue-on-error`): AppImage build; verify
+  contents; checksums; upload; smoke test of the unpacked build under Xvfb.
+- `macos-arm64` (experimental): DMG and ZIP build; verify contents; checksums;
+  upload. No runtime test yet.
+
+Each smoke check is also published as a GitHub annotation and in the run's
+step summary, so results can be read without downloading the evidence.
+Builds are unsigned: `CSC_IDENTITY_AUTO_DISCOVERY=false` stops electron-builder
+from searching for a signing identity.
+
+#### Known limitations and blockers before a public release
+
+1. **Electron 28.3.3 is end-of-life.** Electron supports only its three latest
+   stable major versions ([endoflife.date](https://endoflife.date/electron)). The
+   npm registry lists 44.7.0 as the current release. This is the largest release
+   risk: the shipped runtime (Chromium 120) no longer receives security fixes.
+   Moving to a supported major changes APIs and needs a full regression pass
+   (printing, dialogs, menus, file handling). It was not attempted here.
+2. **Unsigned builds.** Windows SmartScreen will warn on the installer. macOS
+   Gatekeeper blocks an unsigned download until the user opens it manually; a
+   Developer ID signature and notarization are required for distribution. No
+   certificates or secrets were available.
+3. **"Try Sample PDF" and "Try Sample PDF Form" do not work in packaged builds.**
+   The buttons request `/samples/…`, which resolves to the file-system root under
+   `file://`. CI recorded `ERR_FILE_NOT_FOUND` on Windows and Linux. The likely fix is a
+   two-line change in `src/renderer.js` (lines 1136 and 1142) to resolve the
+   samples relative to the page (`../samples/…`), which should also work under
+   `npm run serve`. It was not made here because it changes application code;
+   the two sample PDFs are already packaged.
+4. **No PDF file association and no open-with handling.** `main.js` does not read
+   `process.argv`, and there is no `second-instance` or `open-file` handling, so
+   launching the app with a PDF path would not open it. Phase 9's `.pdf`
+   association should wait until that is implemented.
+5. **No application icon.** `main.js` points at `assets/icon.png`, which does not
+   exist, and there is no `.ico` or `.icns`; builds use Electron's default icon.
+6. **No LICENSE file.** `package.json` declares MIT, but the repository has no
+   license text, and the distributed app needs its own notices (Electron,
+   PDF.js and pdf-lib are included).
+7. **Unused runtime dependency.** `express` is listed under `dependencies` but is
+   only used by the `npm run serve` preview. It is packaged (a small share of the
+   app payload). Moving it to `devDependencies` is a Phase 9 cleanup.
+8. **Identifiers still to confirm:** the application ID `com.cambuz.pdfreader`
+   and the publisher name. The ID is permanent once users install the app.
+9. **Linux sandbox.** The CI smoke test passes `--no-sandbox`, because
+   unprivileged user namespaces are restricted on the runner. An AppImage on a
+   desktop distribution with the same restriction may need the same flag or an
+   AppArmor profile; that was not tested.
+10. **macOS** is arm64-only, its menu template has no macOS application menu
+    (no `appMenu` role), and the build was never launched.
+
+#### Measured sizes
+
+Filled from the latest green `Desktop builds` run; see the run's *Build output*
+annotations for the exact values and SHA-256 digests.
+
+---
+
 ## Phase 7 — Optional OCR
 
 ### Phase 7 status: `OPTIONAL LOCAL OCR IMPLEMENTED; NATIVE DESKTOP CHECK PENDING`
