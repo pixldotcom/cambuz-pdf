@@ -14,9 +14,10 @@
 
 ### Packaging status: `WINDOWS X64 INSTALLER AND PORTABLE BUILT AND SMOKE-TESTED IN CI; LINUX AND macOS EXPERIMENTAL; UNSIGNED; NOT RELEASED`
 
-Packaging was audited before Phase 8. No application behaviour was changed to
-make it build: the work added electron-builder, a staging step, two checker
-scripts and a CI workflow. Phase 8 has not started.
+Packaging was audited before Phase 8. The work added electron-builder configuration,
+a staging script, a package contents checker, a runtime smoke test and a CI
+workflow. No runtime code (`main.js`, `preload.js`, `server.js`, `src/`) was
+changed. Phase 8 has not started.
 
 | Target | Command | Output in `dist/` | Verified in CI (`Desktop builds`) |
 | --- | --- | --- | --- |
@@ -24,10 +25,8 @@ scripts and a CI workflow. Phase 8 has not started.
 | Linux x64 | `npm run build:linux` | `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage`; `linux-unpacked/cambuz-pdf-reader` | Built; smoke test of the unpacked build under Xvfb passed (with `--no-sandbox`); the AppImage itself was not launched |
 | macOS arm64 | `npm run build:mac` | `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg`; `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | Built and contents verified; not launched; unsigned and not notarized |
 
-Measured sizes from CI (`Build output` notices): AppImage 105.5 MiB; DMG 96.6 MiB;
-ZIP 93.3 MiB. The Windows installer and portable sizes are listed under
-*Measured sizes* below. The renderer payload (`app.asar`) is about 19 MB (18.8 MiB)
-before compression; most of each installer is Electron's own runtime.
+Measured sizes and digests are listed under *Measured sizes* below. The renderer
+payload (`app.asar`) is 19.1 MiB; most of each installer is Electron's own runtime.
 
 Artifact formats: Windows NSIS installer (per-user by default, can change the install
 folder, Start-menu shortcut, uninstaller) and a portable executable
@@ -69,11 +68,11 @@ canvas and the text layer. It writes a screenshot, the app log and a JSON report
   removes the PDF.js legacy, viewer and typings folders and all source maps. The
   result is about 21 MiB on disk before compression.
 - electron-builder packages `.build-app/` (`directories.app`), not the project
-  root. This matters: while measuring the build, electron-builder hard-linked
-  the project's `package.json` into its staging area and rewrote it, which
-  removed the `scripts`, `devDependencies` and `build` sections of the working
-  copy. Packaging the staged copy keeps the project file untouched; check
-  `git status` after any packaging run.
+  root. This matters: during an early build that packaged the project root,
+  electron-builder rewrote the project's own `package.json` and removed its
+  `scripts`, `devDependencies` and `build` sections; later builds then silently
+  used default settings. Packaging the staged copy keeps the project file
+  untouched. Check `git status` after any packaging run.
 - `@napi-rs/canvas` is pulled in by `pdfjs-dist` as an optional dependency. It is
   a Node-only native binding (roughly 37 MiB unpacked for win32 x64), and the
   renderer never loads it, so the staged build leaves it out.
@@ -85,7 +84,8 @@ canvas and the text layer. It writes a screenshot, the app log and a JSON report
 
 #### Continuous integration
 
-`.github/workflows/desktop-build.yml` runs on every push and pull request:
+`.github/workflows/desktop-build.yml` runs on pushes and pull requests that change
+files other than Markdown:
 
 - `test` (Ubuntu): `npm test` — the regression suites must pass first.
 - `windows-x64` (gating, Windows Server): build; verify packaged contents; write
@@ -111,9 +111,10 @@ from searching for a signing identity.
    risk: the shipped runtime (Chromium 120) no longer receives security fixes.
    Moving to a supported major changes APIs and needs a full regression pass
    (printing, dialogs, menus, file handling). It was not attempted here.
-2. **Unsigned builds.** Windows SmartScreen will warn on the installer. macOS
-   Gatekeeper blocks an unsigned download until the user opens it manually; a
-   Developer ID signature and notarization are required for distribution. No
+2. **Unsigned builds.** Windows SmartScreen may warn about the installer, and
+   macOS Gatekeeper will not open an unsigned, un-notarized download without a
+   manual override. A code-signing certificate (Windows) and a Developer ID
+   signature with notarization (macOS) are needed for distribution. No
    certificates or secrets were available.
 3. **"Try Sample PDF" and "Try Sample PDF Form" do not work in packaged builds.**
    The buttons request `/samples/…`, which resolves to the file-system root under
@@ -129,8 +130,9 @@ from searching for a signing identity.
 5. **No application icon.** `main.js` points at `assets/icon.png`, which does not
    exist, and there is no `.ico` or `.icns`; builds use Electron's default icon.
 6. **No LICENSE file.** `package.json` declares MIT, but the repository has no
-   license text, and the distributed app needs its own notices (Electron,
-   PDF.js and pdf-lib are included).
+   license text. The packaged app contains third-party code (Electron, PDF.js,
+   pdf-lib and their dependencies); their notices must ship with it. Electron's
+   licence text is already copied into each Windows install folder.
 7. **Unused runtime dependency.** `express` is listed under `dependencies` but is
    only used by the `npm run serve` preview. It is packaged (a small share of the
    app payload). Moving it to `devDependencies` is a Phase 9 cleanup.
@@ -145,8 +147,23 @@ from searching for a signing identity.
 
 #### Measured sizes
 
-Filled from the latest green `Desktop builds` run; see the run's *Build output*
-annotations for the exact values and SHA-256 digests.
+From the green `Desktop builds` run for commit `bf2b525` (the `Build output`
+annotations of each job):
+
+| File | Size | SHA-256 |
+| --- | --- | --- |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` | 81.6 MiB | `ae6c4a3aeb41110a3a5f5301c4e03a05b259fcc75e7986f5541b49c635dd01e3` |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | 81.4 MiB | `f83c26a4d77a0370fa7d8ff55518427bc66bec90fa67a5ad8bf27da08c66d385` |
+| `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | 105.5 MiB | `0eaffacbe14dbefdf277e38963ae50a6829c247f9b66380c79dfae9608050f77` |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | 96.6 MiB | `07b79c8bc0c1edcd8e36af3a6c0c86609d0eba9b059733a9be43d364cb2b102b` |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | 93.3 MiB | `4dd8a8f302345877de552e1ffbaf36e5d814a15055ac318a12fc367b8f990bc0` |
+| `app.asar` inside the Windows build (renderer payload) | 19.1 MiB | - |
+
+Digests identify one build, not one commit. The AppImage digest changed between
+runs `0341f52` and `bf2b525` although the packaging inputs were identical (only a
+comment in `scripts/stage-app.mjs` changed), so builds are not reproducible
+bit-for-bit. Verify a download against the `SHA256SUMS.txt` in the same run's
+artifact.
 
 ---
 
