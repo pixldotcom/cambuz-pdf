@@ -58,13 +58,18 @@ jobs:
       - name: Write SHA-256 checksums
         shell: pwsh
         run: |
-          Get-ChildItem dist -File |
+          $lines = Get-ChildItem dist -File |
             Where-Object { $_.Name -like '*-setup.exe' -or $_.Name -like '*-portable.exe' } |
             ForEach-Object {
               $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLower()
+              $mib = [math]::Round($_.Length / 1MB, 1)
+              Write-Output "::notice title=Build output::$($_.Name) - $mib MiB - SHA-256 $hash"
               "$hash  $($_.Name)"
-            } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+            }
+          $lines | Set-Content -Encoding ascii dist/SHA256SUMS.txt
           Get-Content dist/SHA256SUMS.txt
+          $appAsar = Get-Item dist/win-unpacked/resources/app.asar
+          Write-Output "::notice title=Build output::app.asar (renderer payload) — $([math]::Round($appAsar.Length / 1MB, 1)) MiB"
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -130,6 +135,9 @@ jobs:
           cd dist
           sha256sum *.AppImage > SHA256SUMS.txt
           cat SHA256SUMS.txt
+          for f in *.AppImage; do
+            echo "::notice title=Build output::$f — $(awk -v b=$(stat -c %s "$f") 'BEGIN{printf "%.1f MiB", b/1048576}') — $(sha256sum "$f" | cut -d' ' -f1)"
+          done
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -174,6 +182,9 @@ jobs:
           cd dist
           shasum -a 256 *.dmg *.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
+          for f in *.dmg *.zip; do
+            echo "::notice title=Build output::$f — $(awk -v b=$(stat -f %z "$f") 'BEGIN{printf "%.1f MiB", b/1048576}') — $(shasum -a 256 "$f" | cut -d' ' -f1)"
+          done
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:

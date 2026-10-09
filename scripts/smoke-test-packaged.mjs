@@ -69,14 +69,24 @@ async function main() {
     consoleWarnings: [],
     uncaughtExceptions: [],
   };
+  // Inside GitHub Actions each result is also published as an annotation, so it is
+  // visible in the run's check results without opening the uploaded evidence.
+  const inCi = process.env.GITHUB_ACTIONS === 'true';
+  const annotate = (level, title, message) => {
+    if (!inCi) return;
+    const escaped = String(message).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+    console.log(`::${level} title=${title}::${escaped}`);
+  };
   const record = (name, pass, detail = '') => {
     report.checks.push({ name, pass: Boolean(pass), detail: String(detail) });
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
+    annotate(pass ? 'notice' : 'error', 'Smoke check', `${pass ? 'PASS' : 'FAIL'}: ${name}${detail ? ` — ${detail}` : ''}`);
     return Boolean(pass);
   };
   const note = (name, detail) => {
     report.informational[name] = String(detail);
     console.log(`INFO  ${name}: ${detail}`);
+    annotate('warning', 'Informational', `${name}: ${detail}`);
   };
   const capped = (list, text) => {
     if (list.length < 50) list.push(String(text).slice(0, 500));
@@ -319,6 +329,23 @@ async function main() {
 
   const failed = report.checks.filter((check) => !check.pass).length;
   console.log(report.passed ? `Smoke test passed (${report.checks.length} checks).` : `Smoke test FAILED (${failed} failing check(s)).`);
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const escapeCell = (text) => String(text).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+    const lines = [
+      `### Smoke test: ${report.app} (${report.platform})`,
+      '',
+      `Result: **${report.passed ? 'PASS' : 'FAIL'}** — PDF \`${report.pdf}\` (${report.expectedPages} pages)`,
+      '',
+      '| Check | Result | Detail |',
+      '| --- | --- | --- |',
+      ...report.checks.map((check) => `| ${escapeCell(check.name)} | ${check.pass ? 'PASS' : 'FAIL'} | ${escapeCell(check.detail)} |`),
+      '',
+      ...Object.entries(report.informational).map(([name, detail]) => `- **${escapeCell(name)}:** ${escapeCell(detail)}`),
+      '',
+    ];
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+  }
   process.exit(report.passed ? 0 : 1);
 }
 
