@@ -132,7 +132,7 @@ from searching for a signing identity.
 6. **No LICENSE file.** `package.json` declares MIT, but the repository has no
    license text. The packaged app contains third-party code (Electron, PDF.js,
    pdf-lib and their dependencies); their notices must ship with it. Electron's
-   licence text is already copied into each Windows install folder.
+   license text is already copied into each Windows install folder.
 7. **Unused runtime dependency.** `express` is listed under `dependencies` but is
    only used by the `npm run serve` preview. It is packaged (a small share of the
    app payload). Moving it to `devDependencies` is a Phase 9 cleanup.
