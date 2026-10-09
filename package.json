@@ -10,10 +10,11 @@
     "samples": "node scripts/create-samples.js && python3 scripts/create-unicode-samples.py",
     "samples:js": "node scripts/create-samples.js",
     "samples:unicode": "python3 scripts/create-unicode-samples.py",
-    "test": "node scripts/test-phase2.mjs && node scripts/test-phase2-dom.mjs && node scripts/test-phase3.mjs",
+    "test": "node scripts/test-phase2.mjs && node scripts/test-phase2-dom.mjs && node scripts/test-phase3.mjs && node scripts/test-phase4.mjs",
     "test:node": "node scripts/test-phase2.mjs",
     "test:dom": "node scripts/test-phase2-dom.mjs",
-    "test:phase3": "node scripts/test-phase3.mjs"
+    "test:phase3": "node scripts/test-phase3.mjs",
+    "test:phase4": "node scripts/test-phase4.mjs"
   },
   "author": "Cambuz",
   "license": "MIT",

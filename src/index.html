@@ -6,6 +6,7 @@
   <title>Cambuz PDF Reader</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="print.css">
+  <link rel="stylesheet" href="pdf-ops.css">
   <script type="importmap">
     {"imports":{"pdf-lib":"../node_modules/pdf-lib/dist/pdf-lib.esm.js"}}
   </script>
@@ -37,6 +38,12 @@
             <path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/><circle cx="18" cy="12" r="1"/>
           </svg>
           <span>Print</span>
+        </button>
+        <button id="btn-pageops" class="toolbar-btn" title="Page Tools — rotate, delete, extract, reorder, merge, split (Ctrl+Shift+E)" disabled aria-haspopup="dialog" aria-expanded="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>
+          </svg>
+          <span>Pages</span>
         </button>
         <div class="toolbar-separator"></div>
         <button id="btn-prev" class="toolbar-btn" title="Previous Page (PageUp)" disabled>
@@ -449,6 +456,80 @@
             </svg>
             <span id="print-submit-label">Print</span>
           </button>
+        </div>
+      </footer>
+    </section>
+  </div>
+
+  <!-- Phase 4 page tools: working-copy edits, merge, split, Save As -->
+  <div id="pageops-dialog" class="pageops-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pageops-title">
+    <section class="pageops-panel">
+      <header class="pageops-header">
+        <div class="pageops-heading">
+          <h2 id="pageops-title">Page tools</h2>
+          <p id="pageops-doc-label" class="pageops-doc-label"></p>
+        </div>
+        <span id="pageops-dirty" class="pageops-dirty" hidden>Unsaved changes</span>
+        <button id="btn-pageops-close" class="toolbar-btn" title="Close (Esc)" aria-label="Close page tools">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </header>
+
+      <div class="pageops-toolbar" role="toolbar" aria-label="Page operations">
+        <button id="btn-po-rotate-ccw" class="pageops-btn" title="Rotate selected pages counter-clockwise">Rotate ↺</button>
+        <button id="btn-po-rotate-cw" class="pageops-btn" title="Rotate selected pages clockwise">Rotate ↻</button>
+        <span class="pageops-sep" aria-hidden="true"></span>
+        <button id="btn-po-move-up" class="pageops-btn" title="Move selected pages earlier">Move up</button>
+        <button id="btn-po-move-down" class="pageops-btn" title="Move selected pages later">Move down</button>
+        <span class="pageops-sep" aria-hidden="true"></span>
+        <button id="btn-po-select-all" class="pageops-btn" title="Select all pages (Ctrl+A)">Select all</button>
+        <button id="btn-po-extract" class="pageops-btn" title="Keep only the selected pages in the working copy">Extract selected</button>
+        <button id="btn-po-delete" class="pageops-btn pageops-danger" title="Delete selected pages from the working copy (Delete key)">Delete</button>
+        <span class="pageops-sep" aria-hidden="true"></span>
+        <button id="btn-po-undo" class="pageops-btn" title="Undo the last page operation">Undo</button>
+        <button id="btn-po-add" class="pageops-btn" title="Append the pages of other PDF files to the end (merge)">Merge PDF…</button>
+      </div>
+
+      <div class="pageops-body">
+        <div id="pageops-grid-scroll" class="pageops-grid-scroll">
+          <div id="pageops-grid" class="pageops-grid" aria-label="Pages in working copy"></div>
+          <p class="pageops-hint">Click to select · Ctrl/Cmd-click or Shift-click for several · Delete removes the selection</p>
+        </div>
+
+        <aside class="pageops-side" aria-label="Document information and split options">
+          <section class="pageops-card">
+            <h3>Document information</h3>
+            <label for="po-meta-title">Title</label>
+            <input id="po-meta-title" type="text" maxlength="2000" autocomplete="off">
+            <label for="po-meta-author">Author</label>
+            <input id="po-meta-author" type="text" maxlength="2000" autocomplete="off">
+            <label for="po-meta-subject">Subject</label>
+            <input id="po-meta-subject" type="text" maxlength="2000" autocomplete="off">
+            <label for="po-meta-keywords">Keywords</label>
+            <input id="po-meta-keywords" type="text" maxlength="2000" autocomplete="off">
+            <p id="po-meta-info" class="pageops-meta-info"></p>
+            <button id="btn-po-meta-apply" class="pageops-btn">Apply to working copy</button>
+          </section>
+
+          <section class="pageops-card">
+            <h3>Split</h3>
+            <label for="po-split-spec">Parts</label>
+            <input id="po-split-spec" type="text" placeholder="1-3; 4-6  or  every 2" autocomplete="off" spellcheck="false">
+            <p class="pageops-help">Separate files with <kbd>;</kbd> and list pages with commas (e.g. <kbd>1-3, 5</kbd>). Use <kbd>every N</kbd> for equal chunks.</p>
+            <p id="po-split-error" class="pageops-inline-error" role="alert"></p>
+            <button id="btn-po-split" class="pageops-btn">Split and save parts…</button>
+          </section>
+        </aside>
+      </div>
+
+      <footer class="pageops-footer">
+        <p id="pageops-status" class="pageops-status" role="status" aria-live="polite"></p>
+        <div class="pageops-actions">
+          <button id="btn-po-discard" class="pageops-btn">Discard changes</button>
+          <button id="btn-po-duplicate" class="pageops-btn" title="Save an identical copy of the file as it is on disk. Unsaved page edits are not included.">Duplicate document…</button>
+          <button id="btn-po-save-as" class="btn-primary">Save As…</button>
         </div>
       </footer>
     </section>

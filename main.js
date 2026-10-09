@@ -32,6 +32,21 @@ function createWindow() {
     mainWindow = null;
   });
 
+  // The renderer blocks unload while page edits are unsaved (beforeunload).
+  // Ask before discarding them; "Leave" lets the window close.
+  mainWindow.webContents.on('will-prevent-unload', (event) => {
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning',
+      buttons: ['Leave without saving', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Unsaved page changes',
+      message: 'Leave without saving your page changes?',
+      detail: 'Your edits are only in memory. The original file on disk has not been changed.',
+    });
+    if (choice === 0) event.preventDefault();
+  });
+
   // Build menu
   const template = [
     {
@@ -51,6 +66,21 @@ function createWindow() {
           label: 'Print…',
           accelerator: 'CmdOrCtrl+P',
           click: () => mainWindow.webContents.send('menu-print'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Page Tools…',
+          accelerator: 'CmdOrCtrl+Shift+E',
+          click: () => mainWindow.webContents.send('menu-page-tools'),
+        },
+        {
+          label: 'Save As…',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => mainWindow.webContents.send('menu-save-as'),
+        },
+        {
+          label: 'Duplicate Document…',
+          click: () => mainWindow.webContents.send('menu-duplicate'),
         },
         { type: 'separator' },
         {
@@ -209,6 +239,19 @@ ipcMain.handle('read-file', async (_event, filePath) => {
   }
 });
 
+// Phase 4: pick one or more PDFs to append (merge) into the working copy.
+ipcMain.handle('dialog-open-pdfs', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Add PDF pages',
+    filters: [
+      { name: 'PDF Files', extensions: ['pdf'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+    properties: ['openFile', 'multiSelections'],
+  });
+  return result.canceled ? [] : result.filePaths;
+});
+
 // Return only printer fields needed by the settings UI.
 ipcMain.handle('list-printers', async (event) => {
   try {
@@ -365,6 +408,151 @@ ipcMain.handle('print-pdf', async (_event, rawBytes, rawOptions = {}) => {
     if (tempDirectory) {
       await fs.promises.rm(tempDirectory, { recursive: true, force: true }).catch(() => {});
     }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4: safe file writes. Originals are protected: a save only replaces an
+// existing file after an explicit confirmation, and writes go to a temporary
+// file first so an interrupted save cannot leave a half-written PDF behind.
+
+const MAX_SAVE_FILES = 200;
+
+function samePath(a, b) {
+  if (process.platform === 'win32') return a.toLowerCase() === b.toLowerCase();
+  return a === b;
+}
+
+function safeFileName(name) {
+  const cleaned = path
+    .basename(String(name || ''))
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .trim()
+    .slice(0, 200);
+  const base = cleaned || 'document.pdf';
+  return /\.pdf$/i.test(base) ? base : `${base}.pdf`;
+}
+
+function validatePdfForSave(rawBytes) {
+  const buffer = asPdfBuffer(rawBytes);
+  if (buffer.length < 5 || !buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+    throw new Error('The data to save is not a valid PDF file.');
+  }
+  return buffer;
+}
+
+async function writeFileAtomically(targetPath, buffer) {
+  const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fs.promises.writeFile(tempPath, buffer, { flag: 'wx' });
+    await fs.promises.rename(tempPath, targetPath);
+  } catch (error) {
+    await fs.promises.rm(tempPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function confirmOverwrite(targetPath, originalPath) {
+  const isOriginal = Boolean(originalPath) && samePath(targetPath, originalPath);
+  const response = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Cancel', isOriginal ? 'Overwrite original' : 'Replace file'],
+    defaultId: 0,
+    cancelId: 0,
+    title: isOriginal ? 'Overwrite the original PDF?' : 'Replace existing file?',
+    message: isOriginal
+      ? 'Overwrite the original PDF?'
+      : `"${path.basename(targetPath)}" already exists. Replace it?`,
+    detail: isOriginal
+      ? 'This replaces the file you opened. To keep the original, use Save As with a new name.'
+      : 'The existing file will be replaced.',
+  });
+  return response.response === 1;
+}
+
+// Save As / Duplicate: the user picks the destination in a native dialog.
+ipcMain.handle('save-pdf', async (_event, rawBytes, rawOptions = {}) => {
+  try {
+    const buffer = validatePdfForSave(rawBytes);
+    const options = rawOptions && typeof rawOptions === 'object' ? rawOptions : {};
+    const originalPath = typeof options.originalPath === 'string' && options.originalPath
+      ? path.resolve(options.originalPath)
+      : '';
+    const suggested = safeFileName(options.suggestedName);
+    const defaultDirectory = originalPath ? path.dirname(originalPath) : app.getPath('documents');
+
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save PDF',
+      defaultPath: path.join(defaultDirectory, suggested),
+      filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+
+    let targetPath = path.resolve(result.filePath);
+    if (!/\.pdf$/i.test(targetPath)) targetPath += '.pdf';
+
+    const exists = fs.existsSync(targetPath);
+    const isOriginal = Boolean(originalPath) && samePath(targetPath, originalPath);
+    if (exists || isOriginal) {
+      const confirmed = await confirmOverwrite(targetPath, originalPath);
+      if (!confirmed) return { ok: false, canceled: true };
+    }
+
+    await writeFileAtomically(targetPath, buffer);
+    return { ok: true, path: targetPath, name: path.basename(targetPath), overwroteOriginal: isOriginal };
+  } catch (err) {
+    return { ok: false, error: err.message || 'The PDF could not be saved.' };
+  }
+});
+
+// Split: the user picks one folder; every part is written there.
+ipcMain.handle('save-pdf-files', async (_event, rawFiles, rawOptions = {}) => {
+  try {
+    if (!Array.isArray(rawFiles) || rawFiles.length === 0 || rawFiles.length > MAX_SAVE_FILES) {
+      throw new Error(`Between 1 and ${MAX_SAVE_FILES} files can be saved at once.`);
+    }
+    const files = rawFiles.map((file) => ({
+      name: safeFileName(file && file.name),
+      buffer: validatePdfForSave(file && file.bytes),
+    }));
+    const options = rawOptions && typeof rawOptions === 'object' ? rawOptions : {};
+    const originalPath = typeof options.originalPath === 'string' && options.originalPath
+      ? path.resolve(options.originalPath)
+      : '';
+
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose a folder for the split PDFs',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (picked.canceled || picked.filePaths.length === 0) return { ok: false, canceled: true };
+    const directory = picked.filePaths[0];
+
+    const targets = files.map((file) => path.join(directory, file.name));
+    const conflicts = targets.filter((target) => fs.existsSync(target));
+    const touchesOriginal = originalPath && targets.some((target) => samePath(target, originalPath));
+    if (conflicts.length > 0 || touchesOriginal) {
+      const response = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Cancel', touchesOriginal ? 'Overwrite original' : 'Replace files'],
+        defaultId: 0,
+        cancelId: 0,
+        title: touchesOriginal ? 'Overwrite the original PDF?' : 'Replace existing files?',
+        message: touchesOriginal
+          ? 'One of the split files would overwrite the original PDF.'
+          : `${conflicts.length} file${conflicts.length === 1 ? '' : 's'} already exist in this folder. Replace them?`,
+        detail: 'Choose a different folder to keep existing files.',
+      });
+      if (response.response !== 1) return { ok: false, canceled: true };
+    }
+
+    const written = [];
+    for (let index = 0; index < files.length; index += 1) {
+      await writeFileAtomically(targets[index], files[index].buffer);
+      written.push(path.basename(targets[index]));
+    }
+    return { ok: true, directory, files: written };
+  } catch (err) {
+    return { ok: false, error: err.message || 'The files could not be saved.' };
   }
 });
 
