@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { getOcrStatus, recognizePng } = require('./src/ocr-engine.cjs');
 
 let mainWindow;
 
@@ -247,6 +248,18 @@ ipcMain.handle('read-file', async (_event, filePath) => {
     };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+// Phase 7: optional OCR remains entirely local and is invoked only after the
+// renderer's explicit per-page request. The adapter accepts only a bounded PNG
+// and an allow-listed Tesseract language selection.
+ipcMain.handle('ocr-status', async () => getOcrStatus());
+ipcMain.handle('ocr-page', async (_event, imageBytes, languages) => {
+  try {
+    return { ok: true, ...(await recognizePng(imageBytes, languages)) };
+  } catch (error) {
+    return { ok: false, error: error.message || 'The optional OCR operation failed.' };
   }
 });
 

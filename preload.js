@@ -32,4 +32,7 @@ contextBridge.exposeInMainWorld('cambuzAPI', {
   // Phase 5: forms and document security.
   onMenuForms: (callback) => ipcRenderer.on('menu-forms', callback),
   onMenuSecurity: (callback) => ipcRenderer.on('menu-security', callback),
+  // Phase 7: a bounded PNG + language request is sent to the optional local engine.
+  getOcrStatus: () => ipcRenderer.invoke('ocr-status'),
+  ocrPage: (imageBytes, languages) => ipcRenderer.invoke('ocr-page', imageBytes, languages),
 });

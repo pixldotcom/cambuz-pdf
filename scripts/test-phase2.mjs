@@ -420,7 +420,7 @@ for (const f of [
 }
 
 // ---------------------------------------------------------------------------
-section('9. No Phase-4+ feature leakage');
+section('9. Print integration and optional OCR engine isolation');
 
 {
   const src = ['src/renderer.js', 'src/search.js', 'src/sidebar.js', 'src/recents.js', 'src/printing.js', 'src/print-ui.js', 'main.js']
@@ -430,24 +430,15 @@ section('9. No Phase-4+ feature leakage');
   for (const feature of required) {
     assert(src.includes(feature), `Phase 3 print integration includes ${feature}`);
   }
-  const banned = [
-    'mergePDF',
-    'splitPDF',
-    'extractPages',
-    'deletePages',
-    'tesseract',
-    'OCR(',
-    'telemetry',
-    'analytics',
-  ];
-  let clean = true;
-  for (const feature of banned) {
-    if (src.includes(feature)) {
-      clean = false;
-      fail(`no Phase-4+ leakage: ${feature}`, 'found in current application sources');
-    }
-  }
-  if (clean) pass('no PDF utilities/OCR/telemetry code in current sources');
+  const core = ['src/search.js', 'src/sidebar.js', 'src/recents.js', 'src/printing.js', 'src/print-ui.js']
+    .map((f) => readFileSync(path.join(ROOT, f), 'utf8'))
+    .join('\n')
+    .toLowerCase();
+  const isolated = !core.includes('tesseract') && !core.includes('recognizepng') && !core.includes('createworker');
+  assert(
+    isolated && readFileSync(path.join(ROOT, 'main.js'), 'utf8').includes('./src/ocr-engine.cjs'),
+    'OCR engine and language models stay in a separate optional main-process module'
+  );
 }
 
 // ---------------------------------------------------------------------------

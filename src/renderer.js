@@ -28,6 +28,7 @@ import { PageToolsController } from './pdf-ops-ui.js';
 import { PasswordController } from './pdf-password-ui.js';
 import { FormController } from './pdf-forms-ui.js';
 import { SecurityController } from './pdf-security-ui.js';
+import { OcrController } from './pdf-ocr-ui.js';
 import {
   NO_SECURITY,
   classifyPasswordError,
@@ -79,6 +80,7 @@ let pageTools = null;
 let passwordPrompt = null;
 let forms = null;
 let securityUi = null;
+let ocrUi = null;
 
 // --- DOM elements ---
 const elements = {
@@ -97,6 +99,7 @@ const elements = {
   btnPageTools: document.getElementById('btn-pageops'),
   btnForms: document.getElementById('btn-forms'),
   btnSecurity: document.getElementById('btn-security'),
+  btnOcr: document.getElementById('btn-ocr'),
   btnPrev: document.getElementById('btn-prev'),
   btnNext: document.getElementById('btn-next'),
   btnZoomIn: document.getElementById('btn-zoom-in'),
@@ -218,6 +221,7 @@ async function loadPDF(source, fileName, meta = {}) {
     }
 
     // Swap in the new document only after PDF.js has opened the candidate.
+    ocrUi?.onDocumentChanged();
     await printing?.onDocumentChanged();
     await pageTools?.onDocumentChanged();
     await forms?.onDocumentChanged();
@@ -344,6 +348,7 @@ function fileNameFromUrl(url) {
 
 function closePDF() {
   if (!canReplaceDocument('Closing the document')) return;
+  ocrUi?.onDocumentChanged();
   printing?.onDocumentChanged().catch(() => {});
   pageTools?.onDocumentChanged().catch(() => {});
   forms?.onDocumentChanged().catch(() => {});
@@ -464,7 +469,11 @@ function applySecurityRestrictions() {
 
   // Copying is blocked at the layer level: the text still renders (and can be
   // searched) but it cannot be selected or copied out.
-  elements.textLayer.classList.toggle('no-copy', isBlocked(documentSecurity, 'copy'));
+  const copyBlocked = isBlocked(documentSecurity, 'copy');
+  elements.textLayer.classList.toggle('no-copy', copyBlocked);
+  // OCR converts visible page pixels back into text, so it must respect the
+  // same no-copy permission as native PDF text selection/copying.
+  ocrUi?.setDocumentAvailable(available && !copyBlocked);
 
   securityUi?.updateChip(documentSecurity);
   forms?.setDocumentAvailable(available);
@@ -1214,6 +1223,11 @@ function setupKeyboard() {
         toggleShortcuts(false);
         return;
       }
+      if (ocrUi?.isOpen) {
+        e.preventDefault();
+        ocrUi.hide();
+        return;
+      }
       if (securityUi?.isOpen) {
         e.preventDefault();
         securityUi.hide();
@@ -1244,7 +1258,7 @@ function setupKeyboard() {
 
     // Keep shortcuts intended for the document behind the modal from leaking
     // through while the print settings/preview dialog is active.
-    if (printing?.isOpen || pageTools?.isOpen) return;
+    if (printing?.isOpen || pageTools?.isOpen || ocrUi?.isOpen) return;
 
     if (key === 'F1') {
       e.preventDefault();
@@ -1631,6 +1645,16 @@ export function initApp() {
   securityUi = new SecurityController({
     getSecurity: () => documentSecurity,
     getDocumentName: () => currentFileName,
+    onStatus: (msg) => setStatus(msg),
+  });
+
+  ocrUi = new OcrController({
+    getDoc: () => pdfDoc,
+    getCurrentPage: () => currentPage,
+    getRotation: () => rotation,
+    getDocumentName: () => currentFileName,
+    getDocumentGeneration: () => documentGeneration,
+    isCopyBlocked: () => isBlocked(documentSecurity, 'copy'),
     onStatus: (msg) => setStatus(msg),
   });
 
