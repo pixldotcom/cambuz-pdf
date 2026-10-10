@@ -36,19 +36,18 @@
 > (this set expires around **9 November 2026**). Once manual acceptance passes, these
 > will move to a tagged GitHub Release with permanent download links.
 
-Every file is built from release candidate `ac2b848` in
-[CI run 38032232208](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208)
-(all four jobs green). The current source additionally carries the official Cambuz
-branding and the updated About dialog — the next CI build will include them. Artifacts
-are **unsigned** builds — expect SmartScreen/Gatekeeper notices.
+Every file is built from commit `fe73e6f` (installer size reduction, on top of the official
+Cambuz branding and the updated About dialog) in
+[CI run 38066446109](https://github.com/rajeshkamboj/cambuz-pdf/actions/runs/38066446109)
+(all four jobs green). Artifacts are **unsigned** builds — expect SmartScreen/Gatekeeper notices.
 
 | Platform & architecture | Artifact | Best for | Size | Download |
 | --- | --- | --- | ---: | --- |
-| **Windows 10/11 · x64** *(recommended)* | `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` — NSIS installer | Normal install: pick a folder, Start Menu entry, optional `.pdf` association. Per-user, no admin rights. | 118.3 MiB | [Windows CI artifact][win-dl] (contains installer, portable and `SHA256SUMS.txt`) |
-| Windows 10/11 · x64 | `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | No install at all — run from Desktop, Downloads or a USB stick (it extracts itself at launch) | 118.0 MiB | [Windows CI artifact][win-dl] |
-| Linux x64 *(experimental)* | `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | Try Cambuz on Linux; single-file AppImage | 125.1 MiB | [Linux CI artifact][linux-dl] |
-| macOS 13+ · Apple Silicon *(experimental)* | `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | Drag-to-Applications disk image; unsigned and not notarized | 129.7 MiB | [macOS CI artifact][mac-dl] |
-| macOS 13+ · Apple Silicon *(experimental)* | `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | Same app bundle as a plain ZIP | 125.7 MiB | [macOS CI artifact][mac-dl] |
+| **Windows 10/11 · x64** *(recommended)* | `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` — NSIS installer | Normal install: pick a folder, Start Menu entry, optional `.pdf` association. Per-user, no admin rights. | 97.3 MiB | [Windows CI artifact][win-dl] (contains installer, portable and `SHA256SUMS.txt`) |
+| Windows 10/11 · x64 | `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | No install at all — run from Desktop, Downloads or a USB stick (it extracts itself at launch) | 96.9 MiB | [Windows CI artifact][win-dl] |
+| Linux x64 *(experimental)* | `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | Try Cambuz on Linux; single-file AppImage | 93.0 MiB | [Linux CI artifact][linux-dl] |
+| macOS 13+ · Apple Silicon *(experimental)* | `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | Drag-to-Applications disk image; unsigned and not notarized | 106.7 MiB | [macOS CI artifact][mac-dl] |
+| macOS 13+ · Apple Silicon *(experimental)* | `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | Same app bundle as a plain ZIP | 111.4 MiB | [macOS CI artifact][mac-dl] |
 | Windows arm64, Intel Mac, Linux arm64 | — | Not built | — | *unavailable* |
 
 Newer or expired links? Every push to `main` that changes application or packaging
@@ -61,11 +60,11 @@ find the latest green run on the
 
 | File | SHA-256 |
 | --- | --- |
-| `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` | `7bd699b57cefc7cb76d46c239db89e02a4a3641fb4b6aa12ab49654b56c0e343` |
-| `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | `3c100ecd868cc7711d8c4370f16de7c1d3d7ed20ee2f594db9880ba1b37ab45b` |
-| `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | `4a92789af3634d19d9b6477ac2b7c84b096ee64d9d226f1eff21dcd248e32f16` |
-| `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | `1f1818f1a3774294d40e69e1ff843f04767cd548bfd5e4281dce8afcc09c1335` |
-| `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | `5cfd40dc8a6e866fd3c079d1218079dfadfb94d46c080012bd611e2c7cedb18f` |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` | *pending: copy from `SHA256SUMS.txt` in run 38066446109* |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | *pending: copy from `SHA256SUMS.txt` in run 38066446109* |
+| `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | *pending: copy from `SHA256SUMS.txt` in run 38066446109* |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | *pending: copy from `SHA256SUMS.txt` in run 38066446109* |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | *pending: copy from `SHA256SUMS.txt` in run 38066446109* |
 
 Verify after download: `Get-FileHash -Algorithm SHA256 <file>` (PowerShell) or
 `sha256sum -c SHA256SUMS.txt` (Linux/macOS, inside the artifact folder).
@@ -244,7 +243,7 @@ Honest status of the current build — details and evidence in
 | Printing | Preview, job preparation and native duplex/collation option forwarding are tested; **physical printer output is untested**. Printer capabilities and per-printer non-printable margins are not queried (duplex may be unavailable; edge clipping possible with `None` margins). System dialogs/drivers may override settings. Filled form values do not appear in print — save the filled copy and print that. |
 | Search | Substring, case-insensitive, NFC-normalized; no regex, whole-word or diacritic-insensitive modes. |
 | Forms | AcroForm basics only: XFA/dynamic forms, signature fields and JavaScript-driven fields are shown read-only, never guessed. |
-| Size & memory | The artifacts linked above are 118–130 MiB. The current source builds **93–111 MiB** installers (Windows setup 97.3 MiB, AppImage 93.0 MiB, DMG 106.7 MiB) after trimming unused Chromium locales, SwiftShader and app payload (the Cambuz payload is now 5.7 MiB); the rest is the Electron 44 runtime. See [installer size reduction](DEVELOPMENT.md#installer-size-reduction). Idle memory measured roughly 150–165 MiB across CI runs on the Windows runner. |
+| Size & memory | The artifacts linked above are **93–111 MiB** (Windows setup 97.3 MiB, Windows portable 96.9 MiB, AppImage 93.0 MiB, DMG 106.7 MiB, ZIP 111.4 MiB), down from 118–130 MiB after trimming unused Chromium locales, SwiftShader and app payload (the Cambuz payload is now 5.7 MiB); the rest is the Electron 44 runtime. See [installer size reduction](DEVELOPMENT.md#installer-size-reduction). Idle memory measured roughly 150–165 MiB across CI runs on the Windows runner. |
 | OS floors | Windows 10+ x64, macOS 13+ (arm64), modern x64 Linux. Electron 44 dropped Windows 7/8, 32-bit and macOS 12. |
 | No auto-updates | Re-download a new build manually; there is no update service to run in the background. |
 
@@ -355,6 +354,6 @@ with bundled third-party components listed with full license texts in
   [1.1.0 pre-release notes](docs/RELEASE-NOTES-1.1.0.md) ·
   [Windows acceptance checklist](docs/WINDOWS-ACCEPTANCE-CHECKLIST.md)
 
-[win-dl]: https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662571692
-[linux-dl]: https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662201852
-[mac-dl]: https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662616494
+[win-dl]: https://github.com/rajeshkamboj/cambuz-pdf/actions/runs/38066446109/artifacts/11674263933
+[linux-dl]: https://github.com/rajeshkamboj/cambuz-pdf/actions/runs/38066446109/artifacts/11674794491
+[mac-dl]: https://github.com/rajeshkamboj/cambuz-pdf/actions/runs/38066446109/artifacts/11675445206
