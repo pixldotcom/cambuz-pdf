@@ -13,7 +13,11 @@
 //   5. real mouse input (DevTools Input events) selects multi-line text, Ctrl+C
 //      copies it, and on Windows the system clipboard receives it;
 //   6. Hindi and Punjabi PDFs select and copy their Unicode text;
-//   7. a PDF that denies copying refuses selection and says why.
+//   7. a PDF that denies copying refuses selection and says why;
+//   8. page navigation, zoom, print-preview preparation, a 100-page first/repeat
+//      search probe, a scanned-page render and repeated open/close cycles work;
+//   9. startup/first-page timings and Windows process-tree memory are recorded
+//      as observations, never treated as performance pass thresholds.
 // A screenshot, the app's log, console/log errors and a JSON report are written
 // to --out so they can be uploaded as CI evidence. Exits non-zero on any
 // gating check failure.
@@ -24,9 +28,11 @@
 
 import { execFileSync, execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PDFDocument } from 'pdf-lib';
+import { performance } from 'node:perf_hooks';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,6 +55,22 @@ function parseArgs(argv) {
     else options[name] = value;
   }
   return options;
+}
+
+async function makePackagedSearchProbe() {
+  const pdf = await PDFDocument.create();
+  pdf.setTitle('Cambuz Phase 8 packaged search probe');
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  for (let number = 1; number <= 100; number += 1) {
+    const page = pdf.addPage([612, 792]);
+    page.drawText(`CAMBUZ PERFORMANCE CHECK PAGE ${String(number).padStart(3, '0')}`, {
+      x: 36,
+      y: 740,
+      size: 14,
+      font,
+    });
+  }
+  return Buffer.from(await pdf.save());
 }
 
 // ---------------------------------------------------------------------------
@@ -123,16 +145,61 @@ function textHitTest() {
 
 function viewerState() {
   const layer = document.getElementById('text-layer');
+  const canvas = document.getElementById('pdf-canvas');
   return {
     welcomeVisible: getComputedStyle(document.getElementById('welcome-screen')).display !== 'none',
     file: document.getElementById('status-file').textContent,
     pages: Number(document.getElementById('page-total').textContent),
+    page: Number(document.getElementById('page-input').value),
+    zoom: document.getElementById('zoom-level').textContent,
+    canvasWidth: canvas.width,
+    canvasHeight: canvas.height,
     status: document.getElementById('status-text').textContent,
+    textLength: layer.textContent.trim().length,
     noCopyClass: layer.classList.contains('no-copy'),
     userSelect: getComputedStyle(layer).userSelect,
     formWidgets: document.querySelectorAll('#form-layer .form-widget').length,
     errorShown: getComputedStyle(document.getElementById('error-display')).display !== 'none',
   };
+}
+
+function canvasPaintStats() {
+  const canvas = document.getElementById('pdf-canvas');
+  if (!canvas?.width || !canvas?.height) return { width: 0, height: 0, dark: 0, samples: 0 };
+  const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+  let dark = 0;
+  let samples = 0;
+  for (let i = 0; i < data.length; i += 4 * 61) {
+    samples += 1;
+    if (data[i] < 200 || data[i + 1] < 200 || data[i + 2] < 200) dark += 1;
+  }
+  return { width: canvas.width, height: canvas.height, dark, samples };
+}
+
+function measureSearchInPage(query) {
+  const input = document.getElementById('search-input');
+  const count = document.getElementById('search-count');
+  return new Promise((resolve, reject) => {
+    const startedAt = performance.now();
+    const observer = new MutationObserver(() => finish());
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error(`Search did not finish for ${query}`));
+    }, 20000);
+    const finish = () => {
+      const label = count.textContent.trim();
+      if (!/\bof\s+100\b/.test(label)) return;
+      clearTimeout(timeout);
+      observer.disconnect();
+      resolve({ elapsedMs: performance.now() - startedAt, label });
+    };
+    observer.observe(count, { childList: true, characterData: true, subtree: true });
+    input.focus();
+    input.value = query;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    queueMicrotask(finish);
+  });
 }
 
 function selectionText() {
@@ -189,6 +256,47 @@ function writeWindowsClipboard(text) {
   );
 }
 
+function readWindowsProcessTreeMemory(rootPid) {
+  const root = Number(rootPid);
+  if (!Number.isSafeInteger(root) || root < 1) throw new Error('Invalid packaged-app process id.');
+  const result = powershell(`
+    $ErrorActionPreference = 'Stop'
+    $root = ${root}
+    $all = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId)
+    $ids = [System.Collections.Generic.HashSet[int]]::new()
+    [void]$ids.Add([int]$root)
+    $changed = $true
+    while ($changed) {
+      $changed = $false
+      foreach ($entry in $all) {
+        if ($ids.Contains([int]$entry.ParentProcessId) -and $ids.Add([int]$entry.ProcessId)) { $changed = $true }
+      }
+    }
+    $rows = @(
+      foreach ($entry in $all) {
+        if ($ids.Contains([int]$entry.ProcessId)) {
+          $process = Get-Process -Id ([int]$entry.ProcessId) -ErrorAction SilentlyContinue
+          if ($process) {
+            [pscustomobject]@{
+              WorkingSetBytes = [int64]$process.WorkingSet64
+              PrivateBytes = [int64]$process.PrivateMemorySize64
+            }
+          }
+        }
+      }
+    )
+    $workingSet = [int64](($rows | Measure-Object -Property WorkingSetBytes -Sum).Sum)
+    $privateBytes = [int64](($rows | Measure-Object -Property PrivateBytes -Sum).Sum)
+    [pscustomobject]@{ processCount = $rows.Count; workingSetBytes = $workingSet; privateBytes = $privateBytes } | ConvertTo-Json -Compress
+  `);
+  const parsed = JSON.parse(result);
+  return {
+    processCount: Number(parsed.processCount),
+    workingSetBytes: Number(parsed.workingSetBytes),
+    privateBytes: Number(parsed.privateBytes),
+  };
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (!options.app) throw new Error('--app <executable> is required');
@@ -204,6 +312,8 @@ async function main() {
   const pdfBytes = fs.readFileSync(pdfPath);
   const pdfName = path.basename(pdfPath);
   const expectedPages = (await PDFDocument.load(pdfBytes, { ignoreEncryption: true })).getPageCount();
+  const searchProbeBytes = await makePackagedSearchProbe();
+  const searchProbeName = 'phase8-packaged-search-100p.pdf';
   const isWindows = process.platform === 'win32';
 
   const report = {
@@ -242,8 +352,14 @@ async function main() {
   const capped = (list, text) => {
     if (list.length < 50) list.push(String(text).slice(0, 500));
   };
+  const hostCpus = os.cpus();
+  note(
+    'native smoke environment',
+    `${process.env.RUNNER_OS || os.platform()}-${process.env.RUNNER_ARCH || os.arch()}; Node ${process.version}; ${hostCpus.length} logical CPUs (${hostCpus[0]?.model || 'unknown'}); ${(os.totalmem() / 1048576).toFixed(0)} MiB RAM; GitHub image ${process.env.ImageOS || 'not exported'}`,
+  );
 
   const logStream = fs.createWriteStream(path.join(outDir, 'app-output.log'));
+  const appLaunchStartedAt = performance.now();
   const child = spawn(appPath, [`--remote-debugging-port=${port}`, '--enable-logging=stderr', ...options.args], {
     stdio: ['ignore', 'pipe', 'pipe'],
     // Own process group on POSIX so the whole tree can be stopped; taskkill /T on Windows.
@@ -268,6 +384,24 @@ async function main() {
     }
   };
   const exitDescription = () => (exited ? `exit code ${exited.code ?? exited.signal}` : 'still running');
+  const memorySnapshot = (stage) => {
+    if (!isWindows) {
+      note(`Windows process-tree memory (${stage})`, 'not measured: this smoke run is not on Windows');
+      return null;
+    }
+    try {
+      const sample = readWindowsProcessTreeMemory(child.pid);
+      const mib = (bytes) => (bytes / 1048576).toFixed(1);
+      note(
+        `Windows process-tree memory (${stage})`,
+        `${sample.processCount} processes; working set ${mib(sample.workingSetBytes)} MiB; private bytes ${mib(sample.privateBytes)} MiB`,
+      );
+      return sample;
+    } catch (error) {
+      note(`Windows process-tree memory (${stage})`, `unavailable: ${error.message.split('\\n')[0]}`);
+      return null;
+    }
+  };
 
   let ws = null;
   let send = null;
@@ -288,6 +422,18 @@ async function main() {
       await at('mouseMoved', { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }, { buttons: 1 });
     }
     await at('mouseReleased', to, { buttons: 0, clickCount: 1 });
+  };
+  const clickSelector = async (selector) => {
+    const point = await evaluate(`(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    })()`);
+    if (!point) throw new Error(`Could not find a clickable element: ${selector}`);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0 });
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 });
   };
   const pressCtrlC = async () => {
     const key = { key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, nativeVirtualKeyCode: 67, modifiers: 2 };
@@ -414,6 +560,20 @@ async function main() {
       },
       60000,
     );
+    const startupMs = performance.now() - appLaunchStartedAt;
+    note('startup: process spawn to renderer-ready event', `${startupMs.toFixed(1)} ms; includes CDP target polling/attachment`);
+    const navigationTiming = await evaluate(`(() => {
+      const entry = performance.getEntriesByType('navigation')[0];
+      return entry ? { domContentLoadedMs: entry.domContentLoadedEventEnd, loadMs: entry.loadEventEnd } : null;
+    })()`);
+    if (navigationTiming) {
+      note(
+        'renderer navigation timing',
+        `DOMContentLoaded ${navigationTiming.domContentLoadedMs.toFixed(1)} ms; load ${navigationTiming.loadMs.toFixed(1)} ms from document navigation start`,
+      );
+    } else {
+      note('renderer navigation timing', 'Navigation Timing entry unavailable');
+    }
     const shell = await evaluate(`({
       title: document.title,
       protocol: location.protocol,
@@ -433,9 +593,12 @@ async function main() {
       await evaluate(`document.getElementById('btn-close').click(); true`);
       await waitFor('the welcome screen to return', () => evaluate(`getComputedStyle(document.getElementById('welcome-screen')).display !== 'none'`));
     };
+    await closeDocument();
+    memorySnapshot('settled welcome-screen idle');
     const dropDocument = async (bytes, name) => {
       await closeDocument();
       const b64 = Buffer.from(bytes).toString('base64');
+      const openStartedAt = performance.now();
       await evaluate(`(() => {
         const bytes = Uint8Array.from(atob(${JSON.stringify(b64)}), (c) => c.charCodeAt(0));
         const transfer = new DataTransfer();
@@ -445,11 +608,15 @@ async function main() {
         );
         return true;
       })()`);
-      await waitFor(`${name} to open`, async () => {
-        const state = await inPage(viewerState);
-        return state.file.startsWith(name) && state.pages > 0 && state.status.startsWith('Page 1 of');
+      const state = await waitFor(`${name} to open and render page 1`, async () => {
+        const current = await inPage(viewerState);
+        return current.file.startsWith(name) && current.pages > 0 &&
+          current.status.startsWith('Page 1 of') && current.canvasWidth > 0 && current.canvasHeight > 0
+          ? current
+          : null;
       });
-      return inPage(viewerState);
+      state.openToFirstPageMs = performance.now() - openStartedAt;
+      return state;
     };
     const waitForPageOne = () =>
       waitFor('page 1 to finish rendering', () => evaluate(`document.getElementById('status-text').textContent.startsWith('Page 1 of')`));
@@ -486,6 +653,11 @@ async function main() {
     const dropped = await dropDocument(pdfBytes, pdfName);
     record('dropped PDF opens in the renderer', dropped.pages > 0, `${dropped.pages} page(s) reported`);
     record(`page count matches the file (${expectedPages})`, dropped.pages === expectedPages, `${dropped.pages} reported`);
+    note(
+      'open-to-first-page render (sample PDF)',
+      `${dropped.openToFirstPageMs.toFixed(1)} ms from native-window file-drop dispatch until page 1 canvas/status are ready`,
+    );
+    memorySnapshot('after sample PDF first page rendered');
 
     // 6. Page 1 rendered: canvas painted and text layer built.
     await waitForPageOne();
@@ -535,7 +707,103 @@ async function main() {
       `${hits.hit}/${hits.visible} visible spans are hit; user-select ${hits.userSelect}`,
     );
 
-    // 8. Real mouse selection and Ctrl+C on the cambuz demo.
+    // 8. Exercise page navigation and zoom through the packaged renderer.
+    const setPageWithEnter = async (pageNumber) => {
+      await evaluate(`(() => {
+        const input = document.getElementById('page-input');
+        input.focus();
+        input.value = ${JSON.stringify(String(pageNumber))};
+        return true;
+      })()`);
+      await send('Input.dispatchKeyEvent', {
+        type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+      });
+      await send('Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+      });
+      return waitFor(`page ${pageNumber} to render`, async () => {
+        const state = await inPage(viewerState);
+        return state.page === pageNumber && state.status.startsWith(`Page ${pageNumber} of`) && state.canvasWidth > 0;
+      });
+    };
+    try {
+      await setPageWithEnter(5);
+      await clickSelector('#btn-next');
+      await waitFor('next-page button to navigate to page 6', () =>
+        evaluate(`document.getElementById('page-input').value === '6' && document.getElementById('status-text').textContent.startsWith('Page 6 of')`));
+      await clickSelector('#btn-prev');
+      await waitFor('previous-page button to navigate back to page 5', () =>
+        evaluate(`document.getElementById('page-input').value === '5' && document.getElementById('status-text').textContent.startsWith('Page 5 of')`));
+      record('page-number entry and previous/next navigation render the requested pages', true, 'keyboard jump to page 5; next to 6; previous back to 5');
+    } catch (error) {
+      record('page-number entry and previous/next navigation render the requested pages', false, error.message);
+    } finally {
+      await setPageWithEnter(1).catch(() => {});
+      await waitForPageOne().catch(() => {});
+    }
+
+    try {
+      const zoomBefore = await evaluate(`(() => {
+        const canvas = document.getElementById('pdf-canvas');
+        return { label: document.getElementById('zoom-level').textContent, width: canvas.width, height: canvas.height };
+      })()`);
+      await clickSelector('#btn-zoom-in');
+      await waitFor('zoom-in to rerender the current page', () =>
+        evaluate(`(() => {
+          const canvas = document.getElementById('pdf-canvas');
+          return document.getElementById('zoom-level').textContent !== ${JSON.stringify(zoomBefore.label)} &&
+            (canvas.width !== ${zoomBefore.width} || canvas.height !== ${zoomBefore.height}) &&
+            document.getElementById('status-text').textContent.startsWith('Page 1 of');
+        })()`));
+      const zoomed = await evaluate(`(() => {
+        const canvas = document.getElementById('pdf-canvas');
+        return { label: document.getElementById('zoom-level').textContent, width: canvas.width, height: canvas.height, pixels: canvas.width * canvas.height };
+      })()`);
+      await clickSelector('#btn-zoom-out');
+      await waitFor('zoom-out to restore the initial zoom and canvas', () =>
+        evaluate(`(() => {
+          const canvas = document.getElementById('pdf-canvas');
+          return document.getElementById('zoom-level').textContent === ${JSON.stringify(zoomBefore.label)} &&
+            canvas.width === ${zoomBefore.width} && canvas.height === ${zoomBefore.height} &&
+            document.getElementById('status-text').textContent.startsWith('Page 1 of');
+        })()`));
+      record(
+        'zoom in/out renders and stays within the canvas pixel budget',
+        zoomed.label !== zoomBefore.label && zoomed.pixels <= 16000000,
+        `${zoomBefore.label} → ${zoomed.label} → ${zoomBefore.label}; ${zoomed.pixels.toLocaleString()} backing pixels`,
+      );
+    } catch (error) {
+      record('zoom in/out renders and stays within the canvas pixel budget', false, error.message);
+    }
+
+    try {
+      const printStartedAt = performance.now();
+      await clickSelector('#btn-print');
+      const printPreview = await waitFor('the packaged print preview to build and render', () =>
+        evaluate(`(() => {
+          const dialog = document.getElementById('print-dialog');
+          const canvas = document.getElementById('print-preview-canvas');
+          const status = document.getElementById('print-status').textContent;
+          return getComputedStyle(dialog).display !== 'none' && canvas.width > 0 && canvas.height > 0 && status.startsWith('Preview ready')
+            ? { width: canvas.width, height: canvas.height, status }
+            : null;
+        })()`), 60000);
+      note(
+        'print preview preparation',
+        `${(performance.now() - printStartedAt).toFixed(1)} ms to prepare and render the first of ${await evaluate("document.getElementById('print-preview-total').textContent")} sheet(s); ${printPreview.width}×${printPreview.height}`,
+      );
+      record('packaged print preview prepares a print-ready PDF and renders a sheet', true, printPreview.status);
+      await clickSelector('#btn-print-cancel');
+      await waitFor('print preview to close', () =>
+        evaluate(`getComputedStyle(document.getElementById('print-dialog')).display === 'none'`));
+      note('OS printing', 'preview/PDF preparation tested; no job was submitted to a physical or virtual printer in unattended CI');
+      memorySnapshot('after print preview closed');
+    } catch (error) {
+      record('packaged print preview prepares a print-ready PDF and renders a sheet', false, error.message);
+      await evaluate(`document.getElementById('btn-print-cancel').click(); true`).catch(() => {});
+    }
+
+    // 9. Real mouse selection and Ctrl+C on the cambuz demo.
     await inPage(clearSelection);
     const demoDrag = await inPage(firstSpansForDrag, 3);
     if (!demoDrag) {
@@ -591,7 +859,7 @@ async function main() {
       }
     }
 
-    // 9. Indian-language text: Hindi and Punjabi PDFs select and copy their Unicode.
+    // 10. Indian-language text: Hindi and Punjabi PDFs select and copy their Unicode.
     const indianChecks = [
       { file: HINDI_PDF, label: 'Hindi', pattern: /[\u0900-\u097F]/ },
       { file: PUNJABI_PDF, label: 'Punjabi', pattern: /[\u0A00-\u0A7F]/ },
@@ -639,7 +907,7 @@ async function main() {
       }
     }
 
-    // 10. A document whose author denies copying refuses selection, and says why.
+    // 11. A document whose author denies copying refuses selection, and says why.
     try {
       const denied = await dropDocument(fs.readFileSync(COPY_DENIED_PDF), path.basename(COPY_DENIED_PDF));
       await waitFor('the copy-denied document text layer', () => evaluate(`document.querySelectorAll('#text-layer span').length > 0`));
@@ -656,6 +924,85 @@ async function main() {
       );
     } catch (error) {
       record('a document that denies copying refuses selection and says why', false, error.message);
+    }
+
+    // 12. Measure first and cached repeat searches in the packaged renderer on 100 pages.
+    try {
+      const searchDoc = await dropDocument(searchProbeBytes, searchProbeName);
+      record('packaged renderer opens the 100-page search probe', searchDoc.pages === 100, `${searchDoc.pages} pages`);
+      note(
+        '100-page search probe first-page render',
+        `${searchDoc.openToFirstPageMs.toFixed(1)} ms from drop dispatch to page 1 rendered; ${searchProbeBytes.length} bytes`,
+      );
+      memorySnapshot('after 100-page search probe first page rendered');
+
+      await clickSelector('#btn-search');
+      const firstSearch = await inPage(measureSearchInPage, 'CAMBUZ');
+      record('packaged search finds the marker on all 100 pages', firstSearch.label === '1 of 100', firstSearch.label);
+      await clickSelector('#btn-search-close');
+      await clickSelector('#btn-search');
+      const repeatSearch = await inPage(measureSearchInPage, 'cambuz');
+      record('packaged case-insensitive repeat search returns the same 100-page result', repeatSearch.label === '1 of 100', repeatSearch.label);
+      note(
+        'packaged 100-page full-document search timings',
+        `first query ${firstSearch.elapsedMs.toFixed(2)} ms; same-marker cached re-query ${repeatSearch.elapsedMs.toFixed(2)} ms; timings use renderer performance.now() and include PDF.js text indexing/highlighting`,
+      );
+      memorySnapshot('after 100-page first and repeat searches');
+      await clickSelector('#btn-search-close');
+    } catch (error) {
+      record('packaged 100-page first/repeat search probe completes', false, error.message);
+    }
+
+    // 13. Investigate the Node-canvas failure separately; verify actual Electron renders the scan.
+    try {
+      const scanPath = path.join(repoRoot, 'samples', 'phase7-scanned.pdf');
+      const scanBytes = fs.readFileSync(scanPath);
+      const scan = await dropDocument(scanBytes, path.basename(scanPath));
+      const painted = await inPage(canvasPaintStats);
+      const darkShare = painted.samples ? painted.dark / painted.samples : 0;
+      record(
+        'packaged Electron paints the scanned image page',
+        scan.pages === 4 && painted.width > 0 && painted.height > 0 && darkShare > 0.001,
+        `${scan.pages} pages; canvas ${painted.width}×${painted.height}; ${(darkShare * 100).toFixed(2)}% dark samples`,
+      );
+      record('scanned page remains image-only in the text layer', scan.textLength === 0, `${scan.textLength} selectable characters`);
+      note(
+        'scanned-page raster diagnostic',
+        'this check uses packaged Chromium/Electron; it does not claim to fix the separate Node @napi-rs/canvas SIGSEGV',
+      );
+    } catch (error) {
+      record('packaged Electron paints the scanned image page', false, error.message);
+    }
+
+    // 14. Exercise repeated document open/close and verify canvas release each cycle.
+    try {
+      const cycleStartedAt = performance.now();
+      const cycleCount = 3;
+      let cyclesPassed = 0;
+      const cycleDetails = [];
+      for (let cycle = 1; cycle <= cycleCount; cycle += 1) {
+        const opened = await dropDocument(pdfBytes, pdfName);
+        const pageReady = opened.pages === expectedPages && opened.canvasWidth > 0 && opened.canvasHeight > 0;
+        await closeDocument();
+        const closed = await waitFor(`closed document state after cycle ${cycle}`, async () => {
+          const state = await inPage(viewerState);
+          return state.welcomeVisible && state.canvasWidth === 0 && state.canvasHeight === 0 && state.textLength === 0
+            ? state
+            : null;
+        });
+        const passed = pageReady && closed.welcomeVisible;
+        if (passed) cyclesPassed += 1;
+        cycleDetails.push(`cycle ${cycle}: ${passed ? 'open/render/close passed' : 'failed'}`);
+      }
+      record(
+        'three repeated PDF open/first-render/close cycles release the viewer canvas',
+        cyclesPassed === cycleCount,
+        `${cyclesPassed}/${cycleCount} passed; ${cycleDetails.join('; ')}`,
+      );
+      note('three document lifecycle cycles', `${(performance.now() - cycleStartedAt).toFixed(1)} ms total`);
+      memorySnapshot('after three open-close cycles with document closed');
+    } catch (error) {
+      record('three repeated PDF open/first-render/close cycles release the viewer canvas', false, error.message);
     }
 
     record('no uncaught renderer exceptions', report.uncaughtExceptions.length === 0, `${report.uncaughtExceptions.length} seen`);
@@ -675,6 +1022,29 @@ async function main() {
     report.passed = report.checks.length > 0 && report.checks.every((check) => check.pass);
     fs.writeFileSync(path.join(outDir, 'smoke-test-result.json'), `${JSON.stringify(report, null, 2)}\n`);
     if (inCi) {
+      if (isWindows) {
+        const metricKeys = [
+          'native smoke environment',
+          'startup: process spawn to renderer-ready event',
+          'renderer navigation timing',
+          'Windows process-tree memory (settled welcome-screen idle)',
+          'open-to-first-page render (sample PDF)',
+          'Windows process-tree memory (after sample PDF first page rendered)',
+          'print preview preparation',
+          'packaged 100-page full-document search timings',
+          'Windows process-tree memory (after 100-page first and repeat searches)',
+          'three document lifecycle cycles',
+          'Windows process-tree memory (after three open-close cycles with document closed)',
+        ];
+        const measurements = metricKeys
+          .filter((key) => report.informational[key] !== undefined)
+          .map((key) => `${key}: ${report.informational[key]}`);
+        annotate(
+          'notice',
+          'Native runtime measurements',
+          `${report.app} (${report.platform}); single-run observations, not timing thresholds\n${measurements.join('\n')}`,
+        );
+      }
       const passedCount = report.checks.filter((check) => check.pass).length;
       const lines = [
         ...report.checks.map((check) => `${check.pass ? 'PASS' : 'FAIL'}  ${check.name}${check.detail ? ` — ${check.detail}` : ''}`),

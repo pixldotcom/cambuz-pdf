@@ -1,5 +1,15 @@
 // Cambuz PDF Reader — Sidebar: Thumbnails + Document Outline (Phase 2)
 
+import {
+  CanvasLruCache,
+  getCanvasRenderSize,
+  getThumbnailViewportScale,
+  THUMBNAIL_CACHE_MAX_ENTRIES,
+  THUMBNAIL_CACHE_MAX_PIXELS,
+  THUMBNAIL_CANVAS_MAX_DIMENSION,
+  THUMBNAIL_CANVAS_MAX_PIXELS,
+} from './canvas-budget.js';
+
 const THUMB_WIDTH = 148; // CSS pixels for thumbnail images
 
 export class SidebarController {
@@ -21,7 +31,15 @@ export class SidebarController {
     this.thumbItems = []; // [{ page, el, canvas, rendered, rendering }]
     this.activePage = 1;
     this.observer = null;
+    this.fallbackScrollHandler = null;
+    this.fallbackRefreshTimer = null;
     this.outlineLoaded = false;
+    this.renderGeneration = 0;
+    this.thumbnailCache = new CanvasLruCache({
+      maxEntries: THUMBNAIL_CACHE_MAX_ENTRIES,
+      maxPixels: THUMBNAIL_CACHE_MAX_PIXELS,
+      onEvict: (item) => this.releaseThumbnail(item),
+    });
 
     deps.tabThumbs.addEventListener('click', () => this.setTab('thumbs'));
     deps.tabOutline.addEventListener('click', () => this.setTab('outline'));
@@ -55,11 +73,41 @@ export class SidebarController {
     if (thumbs) this.refreshVisibleThumbs();
   }
 
+  releaseThumbnail(item) {
+    if (!item) return;
+    item.rendered = false;
+    item.pixelCount = 0;
+    if (item.canvas) {
+      item.canvas.width = 0;
+      item.canvas.height = 0;
+    }
+    if (this.observer && item.el?.isConnected) this.observer.observe(item.el);
+    else if (this.fallbackScrollHandler && item.el?.isConnected) this.scheduleFallbackRefresh();
+  }
+
+  scheduleFallbackRefresh() {
+    if (this.fallbackRefreshTimer !== null) return;
+    this.fallbackRefreshTimer = setTimeout(() => {
+      this.fallbackRefreshTimer = null;
+      this.refreshVisibleThumbs();
+    }, 0);
+  }
+
+  cancelThumbnailTasks() {
+    for (const item of this.thumbItems) {
+      try { item.renderTask?.cancel(); } catch (_) { /* already complete */ }
+    }
+  }
+
   /** Build sidebar content for a newly opened document. */
   async openDocument(pdfDoc) {
     this.docToken += 1;
+    this.renderGeneration += 1;
     const token = this.docToken;
     this.disconnectObserver();
+    this.cancelThumbnailTasks();
+    this.thumbnailCache.clear();
+    for (const item of this.thumbItems) this.releaseThumbnail(item);
     this.thumbItems = [];
     this.activePage = 1;
     this.outlineLoaded = false;
@@ -79,6 +127,12 @@ export class SidebarController {
       item.setAttribute('aria-label', `Go to page ${p}`);
       const canvas = document.createElement('canvas');
       canvas.className = 'thumb-canvas';
+      // Browsers allocate a 300 × 150 backing bitmap by default. Keep each
+      // unrendered placeholder allocation-free, including in 100+ page PDFs.
+      canvas.width = 0;
+      canvas.height = 0;
+      canvas.style.width = `${THUMB_WIDTH}px`;
+      canvas.style.height = '40px';
       const label = document.createElement('span');
       label.className = 'thumb-label';
       label.textContent = String(p);
@@ -86,7 +140,15 @@ export class SidebarController {
       item.appendChild(label);
       item.addEventListener('click', () => this.deps.goToPage(p));
       frag.appendChild(item);
-      this.thumbItems.push({ page: p, el: item, canvas, rendered: false, rendering: false });
+      this.thumbItems.push({
+        page: p,
+        el: item,
+        canvas,
+        rendered: false,
+        rendering: false,
+        renderTask: null,
+        pixelCount: 0,
+      });
     }
     this.deps.thumbsPanel.appendChild(frag);
     if (token !== this.docToken) return;
@@ -107,7 +169,11 @@ export class SidebarController {
 
   closeDocument() {
     this.docToken += 1;
+    this.renderGeneration += 1;
     this.disconnectObserver();
+    this.cancelThumbnailTasks();
+    this.thumbnailCache.clear();
+    for (const item of this.thumbItems) this.releaseThumbnail(item);
     this.thumbItems = [];
     this.deps.thumbsPanel.innerHTML = '';
     this.deps.outlinePanel.innerHTML =
@@ -115,13 +181,15 @@ export class SidebarController {
   }
 
   setActivePage(pageNum) {
-    this.activePage = pageNum;
-    for (const t of this.thumbItems) {
-      t.el.classList.toggle('active', t.page === pageNum);
-    }
-    // Render the active thumbnail eagerly so it is never blank.
+    const previous = this.thumbItems[this.activePage - 1];
     const active = this.thumbItems[pageNum - 1];
-    if (active && !active.rendered && !active.rendering) {
+    if (previous !== active) previous?.el.classList.remove('active');
+    this.activePage = pageNum;
+    active?.el.classList.add('active');
+    if (active?.rendered) {
+      this.thumbnailCache.touch(active, active.pixelCount);
+    } else if (active && !active.rendering) {
+      // Render the active thumbnail eagerly so it is never blank.
       this.renderThumb(active, this.docToken);
     }
   }
@@ -136,9 +204,14 @@ export class SidebarController {
   /** Re-render thumbnails (e.g. after rotation changes). */
   async refreshAll() {
     const token = this.docToken;
-    for (const t of this.thumbItems) {
-      t.rendered = false;
-    }
+    const generation = ++this.renderGeneration;
+    this.disconnectObserver();
+    this.cancelThumbnailTasks();
+    const inFlight = this.thumbItems.map((item) => item.renderPromise).filter(Boolean);
+    await Promise.allSettled(inFlight);
+    if (token !== this.docToken || generation !== this.renderGeneration) return;
+    this.thumbnailCache.clear();
+    for (const item of this.thumbItems) this.releaseThumbnail(item);
     this.observeThumbs();
     const active = this.thumbItems[this.activePage - 1];
     if (active) await this.renderThumb(active, token);
@@ -150,22 +223,17 @@ export class SidebarController {
   observeThumbs() {
     this.disconnectObserver();
     if (typeof IntersectionObserver === 'undefined') {
-      // Fallback: render sequentially (old engines).
-      const token = this.docToken;
-      const queue = [...this.thumbItems];
-      const step = async () => {
-        if (token !== this.docToken) return;
-        const next = queue.shift();
-        if (!next) return;
-        await this.renderThumb(next, token);
-        setTimeout(step, 0);
-      };
-      step();
+      // Older engines use scroll geometry instead of painting every page up
+      // front. This keeps fallback memory and CPU proportional to what is seen.
+      this.fallbackScrollHandler = () => this.scheduleFallbackRefresh();
+      this.deps.thumbsPanel.addEventListener('scroll', this.fallbackScrollHandler, { passive: true });
+      this.refreshVisibleThumbs();
       return;
     }
     const token = this.docToken;
-    this.observer = new IntersectionObserver(
+    const observer = new IntersectionObserver(
       (entries) => {
+        if (token !== this.docToken || observer !== this.observer) return;
         for (const e of entries) {
           if (!e.isIntersecting) continue;
           const page = Number(e.target.dataset.page);
@@ -173,12 +241,13 @@ export class SidebarController {
           if (item && !item.rendered && !item.rendering) {
             this.renderThumb(item, token);
           }
-          this.observer.unobserve(e.target);
+          observer.unobserve(e.target);
         }
       },
       { root: this.deps.thumbsPanel, rootMargin: '200px 0px' }
     );
-    for (const t of this.thumbItems) this.observer.observe(t.el);
+    this.observer = observer;
+    for (const t of this.thumbItems) observer.observe(t.el);
   }
 
   disconnectObserver() {
@@ -186,56 +255,111 @@ export class SidebarController {
       this.observer.disconnect();
       this.observer = null;
     }
+    if (this.fallbackScrollHandler) {
+      this.deps.thumbsPanel.removeEventListener('scroll', this.fallbackScrollHandler);
+      this.fallbackScrollHandler = null;
+    }
+    if (this.fallbackRefreshTimer !== null) {
+      clearTimeout(this.fallbackRefreshTimer);
+      this.fallbackRefreshTimer = null;
+    }
   }
 
   refreshVisibleThumbs() {
-    if (!this.observer) return;
+    if (!this.observer && !this.fallbackScrollHandler) return;
+    if (!this.open) return;
     // Re-check items currently in view (e.g. sidebar was just opened).
     const token = this.docToken;
     const panel = this.deps.thumbsPanel;
     const rect = panel.getBoundingClientRect();
+    if (!this.observer && rect.width <= 0 && rect.height <= 0) return;
     for (const t of this.thumbItems) {
       if (t.rendered || t.rendering) continue;
       const r = t.el.getBoundingClientRect();
       if (r.bottom >= rect.top - 200 && r.top <= rect.bottom + 200) {
         this.renderThumb(t, token);
-        this.observer.unobserve(t.el);
+        this.observer?.unobserve(t.el);
       }
     }
   }
 
-  async renderThumb(item, token) {
+  renderThumb(item, token) {
     const doc = this.deps.getDoc();
-    if (!doc) return;
+    if (!doc || token !== this.docToken || item.rendered || item.rendering) {
+      return Promise.resolve();
+    }
     item.rendering = true;
+    const generation = this.renderGeneration;
+    const operation = this.performThumbnailRender(item, doc, token, generation);
+    item.renderPromise = operation;
+    operation.finally(() => {
+      if (item.renderPromise === operation) item.renderPromise = null;
+    });
+    return operation;
+  }
+
+  async performThumbnailRender(item, doc, token, generation) {
+    let page = null;
+    let task = null;
     try {
-      const page = await doc.getPage(item.page);
-      if (token !== this.docToken) return;
+      page = await doc.getPage(item.page);
+      if (
+        token !== this.docToken ||
+        generation !== this.renderGeneration ||
+        doc !== this.deps.getDoc()
+      ) return;
+
       const rotation = this.deps.getRotation();
       const base = page.getViewport({ scale: 1, rotation });
-      const scale = THUMB_WIDTH / base.width;
+      const scale = getThumbnailViewportScale(base.width, base.height, THUMB_WIDTH, {
+        maxPixels: THUMBNAIL_CANVAS_MAX_PIXELS,
+        maxDimension: THUMBNAIL_CANVAS_MAX_DIMENSION,
+      });
       const viewport = page.getViewport({ scale, rotation });
+      const size = getCanvasRenderSize(viewport.width, viewport.height, 1, {
+        maxPixels: THUMBNAIL_CANVAS_MAX_PIXELS,
+        maxDimension: THUMBNAIL_CANVAS_MAX_DIMENSION,
+      });
       const canvas = item.canvas;
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
+      canvas.width = size.width;
+      canvas.height = size.height;
       canvas.style.width = `${Math.floor(viewport.width)}px`;
       canvas.style.height = `${Math.floor(viewport.height)}px`;
       const ctx = canvas.getContext('2d');
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      if (token !== this.docToken) return;
+      if (!ctx) throw new Error('Canvas is unavailable for this thumbnail.');
+      ctx.setTransform(size.scale, 0, 0, size.scale, 0, 0);
+      task = page.render({ canvasContext: ctx, viewport });
+      item.renderTask = task;
+      await task.promise;
+      if (
+        token !== this.docToken ||
+        generation !== this.renderGeneration ||
+        doc !== this.deps.getDoc()
+      ) return;
+
       item.rendered = true;
+      item.pixelCount = canvas.width * canvas.height;
+      this.thumbnailCache.touch(item, item.pixelCount);
+      this.observer?.unobserve(item.el);
+    } catch (err) {
+      if (
+        token === this.docToken &&
+        generation === this.renderGeneration &&
+        err?.name !== 'RenderingCancelledException'
+      ) {
+        console.warn(`Thumbnail render failed (page ${item.page}):`, err);
+        item.el.classList.add('thumb-error');
+        item.canvas.width = 0;
+        item.canvas.height = 0;
+      }
+    } finally {
+      if (item.renderTask === task) item.renderTask = null;
+      item.rendering = false;
       try {
-        page.cleanup();
+        page?.cleanup();
       } catch (_) {
         // ignore
       }
-    } catch (err) {
-      if (token === this.docToken) {
-        console.warn(`Thumbnail render failed (page ${item.page}):`, err);
-        item.el.classList.add('thumb-error');
-      }
-    } finally {
-      item.rendering = false;
     }
   }
 

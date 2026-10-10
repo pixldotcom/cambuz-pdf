@@ -30,6 +30,7 @@ import { FormController } from './pdf-forms-ui.js';
 import { SecurityController } from './pdf-security-ui.js';
 import { OcrController } from './pdf-ocr-ui.js';
 import { pageStatusMessage } from './text-selection.js';
+import { getCanvasRenderSize } from './canvas-budget.js';
 import {
   NO_SECURITY,
   classifyPasswordError,
@@ -57,9 +58,18 @@ let totalPages = 0;
 let currentScale = 1.0;
 let rotation = 0; // 0 | 90 | 180 | 270
 let fitMode = null; // 'page' | 'width' | null (manual zoom)
-let rendering = false;
-let pendingPage = null;
+let renderLoopPromise = null;
+let pendingRenderRequest = null;
+let activeRenderRequest = null;
+let activeRenderTask = null;
 let textLayerTask = null;
+let renderRequestsPaused = false;
+let lastRenderedRequestKey = null;
+let activeRenderedPage = null;
+let activeRenderedDoc = null;
+let loadGeneration = 0;
+let documentCloseGeneration = 0;
+let loadCommitPromise = Promise.resolve();
 let currentFileName = 'Document';
 let currentFileSize = 0;
 let currentFilePath = null; // Electron native path (null in web mode)
@@ -171,7 +181,7 @@ function updateStatusMeta() {
  * one. Resolves with null when the user cancels: a protected PDF is never
  * opened without the password, and a wrong password is never worked around.
  */
-async function openWithPassword(bytes, fileName) {
+async function openWithPassword(bytes, fileName, isCurrent = () => true) {
   let password = '';
   for (;;) {
     try {
@@ -182,9 +192,13 @@ async function openWithPassword(bytes, fileName) {
         password,
         standardFontDataUrl: STANDARD_FONT_DATA_URL,
       }).promise;
-      openedWithPassword = Boolean(password);
-      return doc;
+      if (!isCurrent()) {
+        await doc.destroy().catch(() => {});
+        return null;
+      }
+      return { doc, openedWithPassword: Boolean(password) };
     } catch (error) {
+      if (!isCurrent()) return null;
       const kind = classifyPasswordError(error);
       if (!kind) throw error;
       setStatus('This PDF is protected and needs a password.');
@@ -192,63 +206,79 @@ async function openWithPassword(bytes, fileName) {
         fileName,
         message: passwordErrorMessage(kind, fileName),
       });
-      if (answer === null) return null;
+      if (!isCurrent() || answer === null) return null;
       password = answer;
     }
   }
 }
 
-async function loadPDF(source, fileName, meta = {}) {
-  try {
-    let stableBytes;
-
-    if (source instanceof ArrayBuffer) {
-      stableBytes = new Uint8Array(source).slice();
-    } else if (ArrayBuffer.isView(source)) {
-      stableBytes = new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
-    } else if (typeof source === 'string') {
-      setStatus('Loading document…');
-      const response = await fetch(source);
-      if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.status}`);
-      stableBytes = new Uint8Array(await response.arrayBuffer());
-    } else {
-      throw new Error('Invalid PDF source');
+async function commitLoadedDocument({
+  doc,
+  stableBytes,
+  fileName,
+  meta,
+  security,
+  candidateOpenedWithPassword,
+  loadToken,
+  closeToken,
+}) {
+  const isLoadCurrent = () =>
+    loadToken === loadGeneration && closeToken === documentCloseGeneration;
+  const destroyCandidate = async () => {
+    try {
+      await doc.destroy();
+    } catch (_) {
+      // ignore cleanup errors
     }
+  };
 
-    const doc = await openWithPassword(stableBytes, fileName);
-    if (!doc) {
-      setStatus('Open cancelled — the document was not opened.');
+  const commit = loadCommitPromise.catch(() => {}).then(async () => {
+    if (!isLoadCurrent()) {
+      await destroyCandidate();
       return;
     }
 
-    // Swap in the new document only after PDF.js has opened the candidate.
+    // Close dependent views before replacing the document; opening and parsing
+    // a candidate remains independent so a failed open leaves the old PDF alone.
     ocrUi?.onDocumentChanged();
     await printing?.onDocumentChanged();
     await pageTools?.onDocumentChanged();
     await forms?.onDocumentChanged();
-    if (pdfDoc) {
-      try {
-        await pdfDoc.destroy();
-      } catch (_) {
-        // ignore cleanup errors
-      }
+    renderRequestsPaused = true;
+    cancelRenderWork();
+    if (renderLoopPromise) await renderLoopPromise.catch(() => {});
+    if (!isLoadCurrent()) {
+      if (closeToken === documentCloseGeneration && pdfDoc) renderRequestsPaused = false;
+      await destroyCandidate();
+      return;
     }
+
+    const previousDoc = pdfDoc;
+    activeRenderedPage = null;
+    activeRenderedDoc = null;
+    lastRenderedRequestKey = null;
     pdfDoc = doc;
+    renderRequestsPaused = false;
     originalPdfBytes = stableBytes;
-    // Phase 5: read the permission flags before anything else can act on them.
-    documentSecurity = await readDocumentSecurity(doc, { unlockedWithPassword: openedWithPassword });
+    documentSecurity = security;
+    openedWithPassword = candidateOpenedWithPassword;
     documentGeneration += 1;
-    totalPages = pdfDoc.numPages;
-    currentFileName = fileName || fileNameFromUrl(typeof source === 'string' ? source : '') || 'Document';
+    totalPages = doc.numPages;
+    currentFileName = fileName || 'Document';
     currentFileSize = meta.size || stableBytes.byteLength;
     currentFilePath = meta.path || null;
     rotation = 0;
+    currentScale = 1.0;
     fitMode = 'width';
 
     // Reset search + sidebar for the new document.
-    search.clear();
+    search.clearDocument();
     elements.searchInput.value = '';
     sidebar.closeDocument();
+
+    if (previousDoc && previousDoc !== doc) {
+      previousDoc.destroy().catch(() => {});
+    }
 
     // Start page: explicit request, else remembered page for known files.
     let startPage = 1;
@@ -313,16 +343,40 @@ async function loadPDF(source, fileName, meta = {}) {
     const securityNote = documentSecurity.encrypted ? ' • encrypted' : '';
     setStatus(`Loaded — ${totalPages} page${totalPages !== 1 ? 's' : ''}${securityNote}`);
 
+    const isDocumentActive = () => closeToken === documentCloseGeneration && pdfDoc === doc;
+
     // Sidebar content.
-    await sidebar.openDocument(pdfDoc);
+    await sidebar.openDocument(doc);
+    if (!isDocumentActive()) return;
     sidebar.setActivePage(currentPage);
 
-    // Initial render — fit to width.
-    const baseScale = await getBaseScale('width');
-    currentScale = baseScale;
+    // Initial render — fit to width unless the user changes pages/zoom while
+    // the first viewport is being measured.
+    const scalePage = currentPage;
+    const scaleRotation = rotation;
+    const scaleGeneration = documentGeneration;
+    const scaleBefore = currentScale;
+    const fitModeBefore = fitMode;
+    const baseScale = await getBaseScale('width', {
+      doc,
+      pageNum: scalePage,
+      pageRotation: scaleRotation,
+      generation: scaleGeneration,
+    });
+    if (!isDocumentActive()) return;
+    if (
+      baseScale !== null &&
+      currentPage === scalePage &&
+      rotation === scaleRotation &&
+      currentScale === scaleBefore &&
+      fitMode === fitModeBefore
+    ) {
+      currentScale = baseScale;
+    }
     updateZoomDisplay();
     updateStatusMeta();
     await renderPage(currentPage);
+    if (!isDocumentActive()) return;
 
     // The form sample opens straight into form filling so the feature is
     // visible without hunting for the button.
@@ -331,7 +385,76 @@ async function loadPDF(source, fileName, meta = {}) {
     }
 
     renderRecents();
+  });
+
+  loadCommitPromise = commit.catch(() => {});
+  return commit;
+}
+
+async function loadPDF(source, fileName, meta = {}) {
+  const loadToken = ++loadGeneration;
+  passwordPrompt?.reset();
+  const closeToken = documentCloseGeneration;
+  const isCurrent = () =>
+    loadToken === loadGeneration && closeToken === documentCloseGeneration;
+  let candidateDoc = null;
+
+  try {
+    let stableBytes;
+
+    if (source instanceof ArrayBuffer) {
+      stableBytes = new Uint8Array(source).slice();
+    } else if (ArrayBuffer.isView(source)) {
+      stableBytes = new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
+    } else if (typeof source === 'string') {
+      setStatus('Loading document…');
+      const response = await fetch(source);
+      if (!isCurrent()) return;
+      if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.status}`);
+      stableBytes = new Uint8Array(await response.arrayBuffer());
+    } else {
+      throw new Error('Invalid PDF source');
+    }
+    if (!isCurrent()) return;
+
+    const opened = await openWithPassword(stableBytes, fileName, isCurrent);
+    if (!isCurrent()) {
+      if (opened?.doc) await opened.doc.destroy().catch(() => {});
+      return;
+    }
+    if (!opened) {
+      setStatus('Open cancelled — the document was not opened.');
+      return;
+    }
+    candidateDoc = opened.doc;
+
+    // Read permissions before the document becomes visible. This also keeps
+    // overlapping opens from applying another candidate's password state.
+    const security = await readDocumentSecurity(candidateDoc, {
+      unlockedWithPassword: opened.openedWithPassword,
+    });
+    if (!isCurrent()) {
+      await candidateDoc.destroy().catch(() => {});
+      candidateDoc = null;
+      return;
+    }
+
+    await commitLoadedDocument({
+      doc: candidateDoc,
+      stableBytes,
+      fileName: fileName || fileNameFromUrl(typeof source === 'string' ? source : '') || 'Document',
+      meta,
+      security,
+      candidateOpenedWithPassword: opened.openedWithPassword,
+      loadToken,
+      closeToken,
+    });
+    candidateDoc = null;
   } catch (err) {
+    if (candidateDoc && candidateDoc !== pdfDoc) {
+      await candidateDoc.destroy().catch(() => {});
+    }
+    if (!isCurrent()) return;
     console.error('PDF load error:', err);
     showError(`Failed to open PDF: ${err.message}`);
   }
@@ -349,6 +472,10 @@ function fileNameFromUrl(url) {
 
 function closePDF() {
   if (!canReplaceDocument('Closing the document')) return;
+  loadGeneration += 1;
+  documentCloseGeneration += 1;
+  renderRequestsPaused = true;
+  cancelRenderWork();
   ocrUi?.onDocumentChanged();
   printing?.onDocumentChanged().catch(() => {});
   pageTools?.onDocumentChanged().catch(() => {});
@@ -361,7 +488,7 @@ function closePDF() {
   lastViewportPage = 0;
   documentGeneration += 1;
   search.cancel();
-  search.clear();
+  search.clearDocument();
   elements.searchInput.value = '';
   elements.searchBar.style.display = 'none';
   sidebar.closeDocument();
@@ -371,12 +498,14 @@ function closePDF() {
     pdfDoc.destroy().catch(() => {});
   }
   pdfDoc = null;
+  activeRenderedPage = null;
+  activeRenderedDoc = null;
+  lastRenderedRequestKey = null;
   totalPages = 0;
   currentPage = 1;
   currentScale = 1.0;
   rotation = 0;
   fitMode = null;
-  pendingPage = null;
   currentFileName = 'Document';
   currentFileSize = 0;
   currentFilePath = null;
@@ -528,85 +657,223 @@ function toggleForms() {
 
 // --- Rendering (canvas + selectable text layer) ---
 
-async function renderPage(pageNum) {
-  if (!pdfDoc) return;
-  if (rendering) {
-    pendingPage = pageNum;
-    return;
-  }
-  rendering = true;
-  setStatus(`Rendering page ${pageNum}…`);
+function makeRenderRequest(pageNum) {
+  const doc = pdfDoc;
+  const request = {
+    doc,
+    documentGeneration,
+    pageNum,
+    scale: currentScale,
+    rotation,
+    deviceScale: window.devicePixelRatio || 1,
+    key: '',
+    cancelled: false,
+    waiters: [],
+  };
+  request.key = [
+    request.documentGeneration,
+    request.pageNum,
+    request.scale,
+    request.rotation,
+    request.deviceScale,
+  ].join(':');
+  return request;
+}
+
+function isCurrentRenderRequest(request) {
+  return !!(
+    request &&
+    !request.cancelled &&
+    !renderRequestsPaused &&
+    request.doc === pdfDoc &&
+    request.documentGeneration === documentGeneration &&
+    request.pageNum === currentPage &&
+    request.scale === currentScale &&
+    request.rotation === rotation
+  );
+}
+
+function resolveRenderRequest(request) {
+  if (!request?.waiters) return;
+  for (const resolve of request.waiters.splice(0)) resolve();
+}
+
+function cancelActiveRenderTasks() {
   try {
-    await renderPageNow(pageNum);
-  } finally {
-    rendering = false;
-    if (pendingPage !== null) {
-      const p = pendingPage;
-      pendingPage = null;
-      renderPage(p);
+    activeRenderTask?.cancel();
+  } catch (_) {
+    // A task can finish between reading it and cancellation.
+  }
+  try {
+    textLayerTask?.cancel();
+  } catch (_) {
+    // A task can finish between reading it and cancellation.
+  }
+}
+
+function cancelRenderWork() {
+  if (pendingRenderRequest) {
+    resolveRenderRequest(pendingRenderRequest);
+    pendingRenderRequest = null;
+  }
+  if (activeRenderRequest) {
+    activeRenderRequest.cancelled = true;
+    resolveRenderRequest(activeRenderRequest);
+  }
+  cancelActiveRenderTasks();
+}
+
+function startRenderLoop() {
+  if (renderLoopPromise) return;
+  const loop = drainRenderQueue();
+  renderLoopPromise = loop;
+  loop.then(
+    () => {
+      if (renderLoopPromise !== loop) return;
+      renderLoopPromise = null;
+      if (pendingRenderRequest) startRenderLoop();
+    },
+    () => {
+      if (renderLoopPromise !== loop) return;
+      renderLoopPromise = null;
+      if (pendingRenderRequest) startRenderLoop();
+    }
+  );
+}
+
+async function drainRenderQueue() {
+  while (pendingRenderRequest) {
+    const request = pendingRenderRequest;
+    pendingRenderRequest = null;
+    activeRenderRequest = request;
+    try {
+      if (isCurrentRenderRequest(request)) {
+        setStatus(`Rendering page ${request.pageNum}…`);
+        await renderPageNow(request);
+      }
+    } finally {
+      if (activeRenderRequest === request) activeRenderRequest = null;
+      resolveRenderRequest(request);
     }
   }
 }
 
-async function renderPageNow(pageNum) {
-  const tokenPage = pageNum;
-  try {
-    const page = await pdfDoc.getPage(pageNum);
-    if (!pdfDoc || tokenPage !== currentPage) return;
-    const viewport = page.getViewport({ scale: currentScale, rotation });
+function renderPage(pageNum) {
+  if (!pdfDoc || renderRequestsPaused) return Promise.resolve();
+  const request = makeRenderRequest(pageNum);
 
+  return new Promise((resolve) => {
+    request.waiters.push(resolve);
+
+    if (
+      activeRenderRequest &&
+      !activeRenderRequest.cancelled &&
+      activeRenderRequest.key === request.key
+    ) {
+      activeRenderRequest.waiters.push(resolve);
+      request.waiters.length = 0;
+      return;
+    }
+    if (pendingRenderRequest?.key === request.key) {
+      pendingRenderRequest.waiters.push(resolve);
+      request.waiters.length = 0;
+      return;
+    }
+    if (
+      !activeRenderRequest &&
+      !pendingRenderRequest &&
+      activeRenderedDoc === request.doc &&
+      lastRenderedRequestKey === request.key
+    ) {
+      resolve();
+      return;
+    }
+
+    const carriedWaiters = [];
+    if (pendingRenderRequest) {
+      carriedWaiters.push(...pendingRenderRequest.waiters.splice(0));
+      pendingRenderRequest = null;
+    }
+    if (activeRenderRequest && !activeRenderRequest.cancelled) {
+      carriedWaiters.push(...activeRenderRequest.waiters.splice(0));
+      activeRenderRequest.cancelled = true;
+      cancelActiveRenderTasks();
+    }
+    request.waiters.unshift(...carriedWaiters);
+    pendingRenderRequest = request;
+    startRenderLoop();
+  });
+}
+
+async function renderPageNow(request) {
+  let task = null;
+  try {
+    const page = await request.doc.getPage(request.pageNum);
+    if (!isCurrentRenderRequest(request)) return;
+
+    const viewport = page.getViewport({ scale: request.scale, rotation: request.rotation });
     const canvas = elements.pdfCanvas;
     const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas is unavailable for this page.');
 
-    // High-DPI support.
-    const dpr = window.devicePixelRatio || 1;
+    const size = getCanvasRenderSize(viewport.width, viewport.height, request.deviceScale);
     const w = Math.floor(viewport.width);
     const h = Math.floor(viewport.height);
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
+    canvas.width = size.width;
+    canvas.height = size.height;
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     elements.pageWrapper.style.width = `${w}px`;
     elements.pageWrapper.style.height = `${h}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(size.scale, 0, 0, size.scale, 0, 0);
 
     // Remember the viewport and place the form fields before the (potentially
     // slow) canvas render: the overlay only needs the geometry, and it then
     // stays correct even if the page itself cannot be drawn.
     lastViewport = viewport;
-    lastViewportPage = pageNum;
-    forms?.renderOverlay(pageNum, viewport);
+    lastViewportPage = request.pageNum;
+    forms?.renderOverlay(request.pageNum, viewport);
 
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    if (!pdfDoc || tokenPage !== currentPage) return;
+    task = page.render({ canvasContext: ctx, viewport });
+    activeRenderTask = task;
+    await task.promise;
+    if (!isCurrentRenderRequest(request)) return;
 
-    await renderTextLayer(page, viewport);
-    if (!pdfDoc || tokenPage !== currentPage) return;
+    await renderTextLayer(page, viewport, request);
+    if (!isCurrentRenderRequest(request)) return;
 
     // Say why text cannot be selected here, rather than leaving a silent refusal.
     setStatus(
       pageStatusMessage({
-        pageNumber: pageNum,
+        pageNumber: request.pageNum,
         totalPages,
         hasText: elements.textLayer.textContent.trim().length > 0,
         copyBlocked: isBlocked(documentSecurity, 'copy'),
       })
     );
     updateStatusMeta();
-    sidebar.setActivePage(pageNum);
+    sidebar.setActivePage(request.pageNum);
     if (sidebar.open) sidebar.scrollActiveIntoView();
     search.applyHighlights();
-    search.syncCurrentToPage(pageNum);
+    search.syncCurrentToPage(request.pageNum);
     search.updateCount();
+    activeRenderedPage = request.pageNum;
+    activeRenderedDoc = request.doc;
+    lastRenderedRequestKey = request.key;
   } catch (err) {
     if (err && err.name === 'RenderingCancelledException') return;
-    console.error('Render error:', err);
-    showError(`Failed to render page: ${err.message}`);
+    if (isCurrentRenderRequest(request)) {
+      console.error('Render error:', err);
+      showError(`Failed to render page: ${err.message}`);
+    }
+  } finally {
+    if (activeRenderTask === task) activeRenderTask = null;
   }
 }
 
-async function renderTextLayer(page, viewport) {
+async function renderTextLayer(page, viewport, request) {
   const layer = elements.textLayer;
+  if (!isCurrentRenderRequest(request)) return;
   if (textLayerTask) {
     try {
       textLayerTask.cancel();
@@ -622,6 +889,7 @@ async function renderTextLayer(page, viewport) {
   let task = null;
   try {
     const textContent = await page.getTextContent();
+    if (!isCurrentRenderRequest(request)) return;
     task = new pdfjsLib.TextLayer({
       textContentSource: textContent,
       container: layer,
@@ -635,7 +903,7 @@ async function renderTextLayer(page, viewport) {
     }
     // The canvas is already rendered; a text-layer failure only disables
     // selection/search-highlighting on this page — never a fatal error.
-    console.warn('Text layer render failed:', err);
+    if (isCurrentRenderRequest(request)) console.warn('Text layer render failed:', err);
   } finally {
     if (textLayerTask === task) textLayerTask = null;
   }
@@ -676,20 +944,41 @@ function updateZoomDisplay() {
   updateStatusMeta();
 }
 
-async function getBaseScale(mode) {
-  if (!pdfDoc) return 1;
-  const page = await pdfDoc.getPage(currentPage);
-  const viewport = page.getViewport({ scale: 1, rotation });
+async function getBaseScale(mode, {
+  doc = pdfDoc,
+  pageNum = currentPage,
+  pageRotation = rotation,
+  generation = documentGeneration,
+} = {}) {
+  if (!doc) return 1;
+  let page;
+  try {
+    page = await doc.getPage(pageNum);
+  } catch (error) {
+    if (doc !== pdfDoc || generation !== documentGeneration) return null;
+    throw error;
+  }
+  if (
+    doc !== pdfDoc ||
+    generation !== documentGeneration ||
+    pageNum !== currentPage ||
+    pageRotation !== rotation
+  ) return null;
+  const viewport = page.getViewport({ scale: 1, rotation: pageRotation });
   const container = elements.pdfViewer;
   const padding = 40;
 
   if (mode === 'page') {
     const availW = container.clientWidth - padding;
     const availH = container.clientHeight - padding;
+    if (availW <= 0 || availH <= 0) return 1;
     return Math.min(availW / viewport.width, availH / viewport.height);
   }
   if (mode === 'width') {
     const availW = container.clientWidth - padding;
+    // Headless DOMs and windows before their first layout pass can report zero
+    // dimensions; use a sane 100% scale rather than producing an invalid one.
+    if (availW <= 0) return 1;
     return availW / viewport.width;
   }
   return currentScale;
@@ -713,16 +1002,34 @@ async function zoomOut() {
 
 async function fitToPage() {
   if (!pdfDoc) return;
+  const doc = pdfDoc;
+  const generation = documentGeneration;
+  const page = currentPage;
+  const pageRotation = rotation;
   fitMode = 'page';
-  currentScale = await getBaseScale('page');
+  const scale = await getBaseScale('page', { doc, pageNum: page, pageRotation, generation });
+  if (
+    doc !== pdfDoc || generation !== documentGeneration ||
+    page !== currentPage || pageRotation !== rotation || fitMode !== 'page' || scale === null
+  ) return;
+  currentScale = scale;
   updateZoomDisplay();
   await renderPage(currentPage);
 }
 
 async function fitToWidth() {
   if (!pdfDoc) return;
+  const doc = pdfDoc;
+  const generation = documentGeneration;
+  const page = currentPage;
+  const pageRotation = rotation;
   fitMode = 'width';
-  currentScale = await getBaseScale('width');
+  const scale = await getBaseScale('width', { doc, pageNum: page, pageRotation, generation });
+  if (
+    doc !== pdfDoc || generation !== documentGeneration ||
+    page !== currentPage || pageRotation !== rotation || fitMode !== 'width' || scale === null
+  ) return;
+  currentScale = scale;
   updateZoomDisplay();
   await renderPage(currentPage);
 }
@@ -731,11 +1038,36 @@ async function fitToWidth() {
 
 async function setRotation(deg) {
   if (!pdfDoc) return;
+  const doc = pdfDoc;
+  const generation = documentGeneration;
+  const requestedPage = currentPage;
+  const requestedFitMode = fitMode;
   rotation = ((deg % 360) + 360) % 360;
-  // Keep fit modes accurate in the new orientation.
-  if (fitMode === 'page' || fitMode === 'width') {
-    currentScale = await getBaseScale(fitMode);
-    updateZoomDisplay();
+  const requestedRotation = rotation;
+
+  // Keep fit modes accurate in the new orientation, but do not let a delayed
+  // measurement overwrite a newer zoom, navigation, rotation, or document.
+  if (requestedFitMode === 'page' || requestedFitMode === 'width') {
+    let scale = await getBaseScale(requestedFitMode, {
+      doc,
+      pageNum: requestedPage,
+      pageRotation: requestedRotation,
+      generation,
+    });
+    if (doc !== pdfDoc || generation !== documentGeneration || requestedRotation !== rotation) return;
+    if (scale === null && requestedPage !== currentPage && fitMode === requestedFitMode) {
+      scale = await getBaseScale(requestedFitMode, {
+        doc,
+        pageNum: currentPage,
+        pageRotation: requestedRotation,
+        generation,
+      });
+    }
+    if (doc !== pdfDoc || generation !== documentGeneration || requestedRotation !== rotation) return;
+    if (fitMode === requestedFitMode && scale !== null) {
+      currentScale = scale;
+      updateZoomDisplay();
+    }
   }
   updateStatusMeta();
   setStatus(`Rotation: ${rotation}°`);
@@ -1556,11 +1888,25 @@ function setupEvents() {
     clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(async () => {
       if (!pdfDoc || !fitMode) return;
-      if (fitMode === 'page') {
-        currentScale = await getBaseScale('page');
-      } else if (fitMode === 'width') {
-        currentScale = await getBaseScale('width');
+      const doc = pdfDoc;
+      const generation = documentGeneration;
+      const page = currentPage;
+      const pageRotation = rotation;
+      const mode = fitMode;
+      let scale = await getBaseScale(mode, { doc, pageNum: page, pageRotation, generation });
+      if (scale === null && doc === pdfDoc && generation === documentGeneration && mode === fitMode) {
+        scale = await getBaseScale(mode, {
+          doc,
+          pageNum: currentPage,
+          pageRotation: rotation,
+          generation,
+        });
       }
+      if (
+        doc !== pdfDoc || generation !== documentGeneration ||
+        pageRotation !== rotation || mode !== fitMode || scale === null
+      ) return;
+      currentScale = scale;
       updateZoomDisplay();
       await renderPage(currentPage);
     }, 150);

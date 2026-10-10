@@ -31,15 +31,14 @@ export function foldCase(s) {
 
 let graphemeSegmenter = null;
 
-/** Split a string into graphemes with UTF-16 source offsets. */
-function getGraphemeSegments(text) {
+/** Yield graphemes with UTF-16 source offsets without retaining a page-sized array. */
+function* getGraphemeSegments(text) {
   if (typeof Intl.Segmenter === 'function') {
     graphemeSegmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-    return [...graphemeSegmenter.segment(text)].map(({ segment, index }) => ({
-      segment,
-      index,
-      end: index + segment.length,
-    }));
+    for (const { segment, index } of graphemeSegmenter.segment(text)) {
+      yield { segment, index, end: index + segment.length };
+    }
+    return;
   }
 
   // Compatibility fallback for older runtimes. It preserves combining marks,
@@ -62,23 +61,64 @@ function getGraphemeSegments(text) {
     joinNext = char === '\u200d';
     index += length;
   }
-  return segments;
+  yield* segments;
 }
 
-/** Build a comparison string plus a safe range map back to source graphemes. */
-function buildComparisonIndex(text, matchCase) {
+/**
+ * Build the normalized comparison text without constructing a per-code-unit
+ * offset object for every character. Most PDF text maps one-to-one after
+ * canonical normalization/case folding; `requiresDedup` marks the rare case
+ * expansion that still needs grapheme-aware range checking.
+ */
+function buildComparisonText(text, matchCase) {
   const pieces = [];
-  const offsets = [];
-  for (const { segment, index, end } of getGraphemeSegments(text)) {
+  let requiresDedup = false;
+  for (const { segment } of getGraphemeSegments(text)) {
     let normalized = normalizeStr(segment);
     if (!matchCase) normalized = foldCase(normalized);
     if (!normalized) continue;
+    if (normalized.length > segment.length) requiresDedup = true;
     pieces.push(normalized);
+  }
+  return { text: pieces.join(''), requiresDedup };
+}
+
+/** Build a compact typed range map back to source graphemes for highlighting. */
+function buildComparisonIndex(text, matchCase) {
+  const comparison = buildComparisonText(text, matchCase);
+  const starts = new Uint32Array(comparison.text.length);
+  const ends = new Uint32Array(comparison.text.length);
+  let offset = 0;
+  for (const { segment, index, end } of getGraphemeSegments(text)) {
+    let normalized = normalizeStr(segment);
+    if (!matchCase) normalized = foldCase(normalized);
     for (let unit = 0; unit < normalized.length; unit += 1) {
-      offsets.push({ start: index, end });
+      starts[offset] = index;
+      ends[offset] = end;
+      offset += 1;
     }
   }
-  return { text: pieces.join(''), offsets };
+  return { text: comparison.text, starts, ends, requiresDedup: comparison.requiresDedup };
+}
+
+function normalizeQuery(query, matchCase) {
+  let needle = normalizeStr(typeof query === 'string' ? query : '');
+  if (!matchCase) needle = foldCase(needle);
+  return needle;
+}
+
+function countComparisonMatches(comparisonText, query, matchCase) {
+  const needle = normalizeQuery(query, matchCase);
+  if (!needle) return 0;
+  let count = 0;
+  let from = 0;
+  while (from <= comparisonText.length) {
+    const index = comparisonText.indexOf(needle, from);
+    if (index < 0) break;
+    count += 1;
+    from = index + needle.length;
+  }
+  return count;
 }
 
 /**
@@ -100,8 +140,7 @@ export function findAllMatches(text, query, matchCase = false) {
   if (!rawQuery) return [];
 
   const haystack = buildComparisonIndex(rawText, matchCase);
-  let needle = normalizeStr(rawQuery);
-  if (!matchCase) needle = foldCase(needle);
+  const needle = normalizeQuery(rawQuery, matchCase);
   if (!needle) return [];
 
   const matches = [];
@@ -109,10 +148,10 @@ export function findAllMatches(text, query, matchCase = false) {
   while (from <= haystack.text.length) {
     const index = haystack.text.indexOf(needle, from);
     if (index < 0) break;
-    const first = haystack.offsets[index];
-    const last = haystack.offsets[index + needle.length - 1];
-    if (first && last) {
-      const match = { index: first.start, length: last.end - first.start };
+    const firstStart = haystack.starts[index];
+    const lastEnd = haystack.ends[index + needle.length - 1];
+    if (firstStart !== undefined && lastEnd !== undefined) {
+      const match = { index: firstStart, length: lastEnd - firstStart };
       const previous = matches[matches.length - 1];
       // Case conversion can expand one grapheme (for example, dotted-I).
       // Do not count two normalized code points as duplicate hits on the same
@@ -136,18 +175,23 @@ export function verifyMatch(text, index, length, query, matchCase = false) {
     return false;
   }
   const sourceRange = raw.slice(index, index + length);
-  const comparison = buildComparisonIndex(sourceRange, matchCase).text;
-  let expected = normalizeStr(query);
-  if (!matchCase) expected = foldCase(expected);
+  const comparison = buildComparisonText(sourceRange, matchCase).text;
+  const expected = normalizeQuery(query, matchCase);
   // A comparison range may be the whole source grapheme while the query is a
   // substring of its normalized form (e.g. case-expanded dotted-I). The range
   // must still contain the query before it is safe to highlight.
   return comparison.includes(expected);
 }
 
-/** Count matches of `query` inside `text`. */
+/** Count matches of `query` inside `text` without building highlight ranges. */
 export function countMatches(text, query, matchCase = false) {
-  return findAllMatches(text, query, matchCase).length;
+  const rawText = typeof text === 'string' ? text : '';
+  if (typeof query !== 'string' || !query) return 0;
+  const comparison = buildComparisonText(rawText, matchCase);
+  if (comparison.requiresDedup) {
+    return findAllMatches(rawText, query, matchCase).length;
+  }
+  return countComparisonMatches(comparison.text, query, matchCase);
 }
 
 /**
@@ -158,18 +202,66 @@ export function countMatches(text, query, matchCase = false) {
  * are not accidentally concatenated.
  */
 export function getSearchableText(items) {
-  let text = '';
+  const pieces = [];
   for (const item of items || []) {
     if (!item || typeof item.str !== 'string') continue;
-    text += item.str;
-    if (item.hasEOL) text += '\n';
+    pieces.push(item.str);
+    if (item.hasEOL) pieces.push('\n');
   }
-  return text;
+  return pieces.join('');
 }
 
 /** Count matches in the text items returned by PDF.js. */
 export function countTextContentMatches(items, query, matchCase = false) {
   return countMatches(getSearchableText(items), query, matchCase);
+}
+
+const PAGE_TEXT_CACHE_MAX_BYTES = 8 * 1024 * 1024;
+const PAGE_TEXT_CACHE_MAX_PAGES = 2048;
+
+/** Small LRU of extracted searchable text; both strings are included in its budget. */
+class PageTextCache {
+  constructor() {
+    this.entries = new Map();
+    this.bytes = 0;
+  }
+
+  get(pageNumber) {
+    const entry = this.entries.get(pageNumber);
+    if (!entry) return null;
+    this.entries.delete(pageNumber);
+    this.entries.set(pageNumber, entry);
+    return entry;
+  }
+
+  set(pageNumber, entry) {
+    const bytes = (entry.text.length + entry.comparisonText.length) * 2;
+    if (bytes > PAGE_TEXT_CACHE_MAX_BYTES) return false;
+    this.delete(pageNumber);
+    while (
+      this.entries.size >= PAGE_TEXT_CACHE_MAX_PAGES ||
+      this.bytes + bytes > PAGE_TEXT_CACHE_MAX_BYTES
+    ) {
+      const oldestPage = this.entries.keys().next().value;
+      if (oldestPage === undefined) break;
+      this.delete(oldestPage);
+    }
+    this.entries.set(pageNumber, { ...entry, bytes });
+    this.bytes += bytes;
+    return true;
+  }
+
+  delete(pageNumber) {
+    const entry = this.entries.get(pageNumber);
+    if (!entry) return;
+    this.entries.delete(pageNumber);
+    this.bytes -= entry.bytes;
+  }
+
+  clear() {
+    this.entries.clear();
+    this.bytes = 0;
+  }
 }
 
 /** Gather text-layer span ranges in document order, preserving explicit BRs. */
@@ -217,6 +309,8 @@ export class SearchController {
     this.current = null; // { page, index } — index within page
     this.searchToken = 0;
     this.searching = false;
+    this.pageTextCache = new PageTextCache();
+    this.cachedDoc = null;
   }
 
   /** Start (or restart) a document search for `query`. */
@@ -237,7 +331,15 @@ export class SearchController {
     }
 
     const doc = this.deps.getDoc();
-    if (!doc) return;
+    if (!doc) {
+      this.pageTextCache.clear();
+      this.cachedDoc = null;
+      return;
+    }
+    if (this.cachedDoc !== doc) {
+      this.pageTextCache.clear();
+      this.cachedDoc = doc;
+    }
     this.searching = true;
     const n = doc.numPages;
     this.numPages = n;
@@ -247,7 +349,7 @@ export class SearchController {
     for (let p = 1; p <= n; p++) {
       if (token !== this.searchToken) return; // superseded / cancelled
       try {
-        const count = await this.#countPageMatches(doc, p, q);
+        const count = await this.#countPageMatches(doc, p, q, token);
         pageMatches[p] = { count };
         total += count;
       } catch (err) {
@@ -292,16 +394,47 @@ export class SearchController {
     );
   }
 
-  async #countPageMatches(doc, pageNum, query) {
-    const page = await doc.getPage(pageNum);
-    const tc = await page.getTextContent();
-    const count = countTextContentMatches(tc.items, query, this.matchCase);
-    try {
-      page.cleanup();
-    } catch (_) {
-      // ignore — cleanup is best-effort
+  async #countPageMatches(doc, pageNum, query, token) {
+    let pageText = this.pageTextCache.get(pageNum);
+    if (!pageText) {
+      const page = await doc.getPage(pageNum);
+      try {
+        if (!this.#isCurrentSearch(token, doc)) return 0;
+        const textContent = await page.getTextContent();
+        if (!this.#isCurrentSearch(token, doc)) return 0;
+        const text = getSearchableText(textContent.items);
+        const comparison = buildComparisonText(text, this.matchCase);
+        pageText = {
+          text,
+          comparisonText: comparison.text,
+          requiresDedup: comparison.requiresDedup,
+          matchCase: this.matchCase,
+        };
+        this.pageTextCache.set(pageNum, pageText);
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {
+          // ignore — cleanup is best-effort
+        }
+      }
+    } else if (pageText.matchCase !== this.matchCase) {
+      const comparison = buildComparisonText(pageText.text, this.matchCase);
+      pageText = {
+        ...pageText,
+        comparisonText: comparison.text,
+        requiresDedup: comparison.requiresDedup,
+        matchCase: this.matchCase,
+      };
+      this.pageTextCache.set(pageNum, pageText);
     }
-    return count;
+
+    if (pageText.requiresDedup) return countMatches(pageText.text, query, this.matchCase);
+    return countComparisonMatches(pageText.comparisonText, query, this.matchCase);
+  }
+
+  #isCurrentSearch(token, doc) {
+    return token === this.searchToken && doc === this.deps.getDoc() && this.cachedDoc === doc;
   }
 
   /** Move to the next match (wrapping around the document). */
@@ -491,6 +624,13 @@ export class SearchController {
     this.searching = false;
     this.clearMarks();
     this.deps.onCount('');
+  }
+
+  /** Drop query state and every retained page string when a document closes. */
+  clearDocument() {
+    this.clear();
+    this.pageTextCache.clear();
+    this.cachedDoc = null;
   }
 
   /** Cancel an in-flight search without touching the UI. */
