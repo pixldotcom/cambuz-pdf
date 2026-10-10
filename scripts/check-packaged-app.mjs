@@ -14,10 +14,14 @@ const REQUIRED_FILES = [
   'main.js',
   'preload.js',
   'package.json',
+  'LICENSE',
+  'THIRD-PARTY-NOTICES.md',
+  'assets/icon.png',
   'src/index.html',
   'src/renderer.js',
   'src/bundled-samples.cjs',
   'src/context-menu.cjs',
+  'src/file-open.cjs',
   'src/text-selection.js',
   'node_modules/pdfjs-dist/build/pdf.mjs',
   'node_modules/pdfjs-dist/build/pdf.worker.mjs',
@@ -27,12 +31,14 @@ const REQUIRED_FILES = [
 const REQUIRED_DIRECTORIES = ['node_modules/pdfjs-dist/standard_fonts'];
 
 // Paths that must never ship: tests/tooling, the Electron toolchain itself,
-// the Node-only canvas binding that the renderer never loads, and source maps.
+// the Node-only canvas binding that the renderer never loads, the dev-only
+// preview server, and source maps.
 const FORBIDDEN = [
   (p) => p.startsWith('scripts/'),
   (p) => p.startsWith('.github/'),
   (p) => p.startsWith('node_modules/electron/') || p.startsWith('node_modules/electron-builder/'),
   (p) => p.startsWith('node_modules/jsdom/'),
+  (p) => p.startsWith('node_modules/express/'),
   (p) => p.includes('/@napi-rs/'),
   (p) => p.includes('pdfjs-dist/legacy/'),
   (p) => p.endsWith('.map'),

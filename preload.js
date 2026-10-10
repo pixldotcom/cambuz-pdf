@@ -4,6 +4,11 @@ contextBridge.exposeInMainWorld('cambuzAPI', {
   openFile: () => ipcRenderer.invoke('dialog-open-file'),
   readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
   readSample: (name) => ipcRenderer.invoke('read-sample', name),
+  // Phase 9: opening PDFs from the OS. The renderer calls rendererReady once
+  // its open-file-path listener is registered; a file that arrived before
+  // then is returned ({ file }) instead of being pushed.
+  rendererReady: () => ipcRenderer.invoke('renderer-ready'),
+  onOpenFilePath: (callback) => ipcRenderer.on('open-file-path', callback),
   getPrinters: () => ipcRenderer.invoke('list-printers'),
   printPdf: (pdfBytes, options) => ipcRenderer.invoke('print-pdf', pdfBytes, options),
   onMenuPrint: (callback) => ipcRenderer.on('menu-print', callback),

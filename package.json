@@ -33,7 +33,6 @@
   "author": "Cambuz",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.0.379"
   },
@@ -50,8 +49,9 @@
     "@expo-google-fonts/noto-sans-telugu": "^0.4.2",
     "@napi-rs/canvas": "^1.0.10",
     "@pdf-lib/fontkit": "^1.1.1",
-    "electron": "^28.0.0",
+    "electron": "^44.7.0",
     "electron-builder": "^26.17.0",
+    "express": "^4.22.3",
     "jsdom": "^30.1.2"
   },
   "build": {
@@ -64,7 +64,18 @@
     },
     "npmRebuild": false,
     "asar": true,
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "CambuzPDFReader.Document",
+        "description": "PDF Document",
+        "mimeType": "application/pdf",
+        "role": "Viewer",
+        "rank": "Alternate"
+      }
+    ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -83,12 +94,14 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "license": "LICENSE",
       "artifactName": "Cambuz-PDF-Reader-${version}-win-${arch}-setup.${ext}"
     },
     "portable": {
       "artifactName": "Cambuz-PDF-Reader-${version}-win-${arch}-portable.${ext}"
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "AppImage",
@@ -102,6 +115,7 @@
       "artifactName": "Cambuz-PDF-Reader-${version}-linux-${arch}.${ext}"
     },
     "mac": {
+      "icon": "build/icon.icns",
       "target": [
         {
           "target": "dmg",

@@ -1516,6 +1516,33 @@ async function openBundledSample(fileName, meta = {}) {
   }
 }
 
+/**
+ * Open a PDF named by the operating system (double-click, Open With, launch
+ * argument, second instance). The bytes travel through the same sandboxed
+ * `read-file` channel as the Open dialog, so paths with spaces or non-ASCII
+ * characters need no special handling and a missing file shows the same clear
+ * error. Re-selecting the already-open file is a no-op.
+ */
+async function openOsFile(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return;
+  // Same file, possibly spelled with different letter case (common on
+  // Windows): do not reload it.
+  if (
+    currentFilePath &&
+    (filePath === currentFilePath || filePath.toLowerCase() === currentFilePath.toLowerCase())
+  ) {
+    return;
+  }
+  if (!canReplaceDocument('Opening the selected file')) return;
+  try {
+    const { buffer, name, size } = await readElectronFile(filePath);
+    await loadPDF(buffer, name, { path: filePath, size });
+  } catch (err) {
+    console.error('Open failed:', err);
+    showError(`Failed to open PDF: ${err.message}`);
+  }
+}
+
 // --- Drag and Drop ---
 
 let dragCounter = 0;
@@ -1946,6 +1973,8 @@ function setupEvents() {
     if (api.onMenuDuplicate) api.onMenuDuplicate(() => duplicateRequested());
     if (api.onMenuForms) api.onMenuForms(() => toggleForms());
     if (api.onMenuSecurity) api.onMenuSecurity(() => pdfDoc && securityUi?.show());
+    // Phase 9: PDFs handed over by the OS while the app runs.
+    if (api.onOpenFilePath) api.onOpenFilePath((_event, filePath) => openOsFile(filePath));
   }
 
   // Unsaved page edits and form values live only in memory; warn before
@@ -2050,12 +2079,28 @@ export function initApp() {
   setupKeyboard();
   renderRecents();
 
-  // Startup: explicit ?pdf= URL wins, otherwise optionally reopen last doc.
+  // Startup: a PDF handed over by the OS wins, otherwise an explicit ?pdf=
+  // URL, otherwise optionally reopen the last document.
   const params = new URLSearchParams(window.location.search);
   const pdfUrl = params.get('pdf');
-  if (pdfUrl) {
-    loadPDF(pdfUrl, fileNameFromUrl(pdfUrl));
+  const openStartupDocument = (osFile) => {
+    if (typeof osFile === 'string' && osFile) {
+      openOsFile(osFile);
+    } else if (pdfUrl) {
+      loadPDF(pdfUrl, fileNameFromUrl(pdfUrl));
+    } else {
+      maybeReopenLast();
+    }
+  };
+  if (isElectron() && window.cambuzAPI?.rendererReady) {
+    window.cambuzAPI.rendererReady().then(
+      (pending) => openStartupDocument(pending && pending.file),
+      (err) => {
+        console.warn('Startup handshake failed:', err);
+        openStartupDocument(null);
+      },
+    );
   } else {
-    maybeReopenLast();
+    openStartupDocument(null);
   }
 }

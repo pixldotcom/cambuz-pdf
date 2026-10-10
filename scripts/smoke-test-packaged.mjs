@@ -6,17 +6,19 @@
 //   1. the window opens, the title is right and the preload bridge is exposed;
 //   2. both welcome-screen sample buttons open their documents, and the form
 //      sample shows its fillable fields;
-//   3. a PDF is opened through the same drop path a user uses; PDF.js reports the
+//   3. when --launch-pdf/--second-pdf are given, a launch-with-file argument opens
+//      its document and a second process hands off to the running window;
+//   4. a PDF is opened through the same drop path a user uses; PDF.js reports the
 //      expected page count, paints the page canvas and builds a text layer;
-//   4. the text layer sits exactly over the canvas, every span is over painted
+//   5. the text layer sits exactly over the canvas, every span is over painted
 //      glyphs, and spans are the top element under the pointer;
-//   5. real mouse input (DevTools Input events) selects multi-line text, Ctrl+C
+//   6. real mouse input (DevTools Input events) selects multi-line text, Ctrl+C
 //      copies it, and on Windows the system clipboard receives it;
-//   6. Hindi and Punjabi PDFs select and copy their Unicode text;
-//   7. a PDF that denies copying refuses selection and says why;
-//   8. page navigation, zoom, print-preview preparation, a 100-page first/repeat
+//   7. Hindi and Punjabi PDFs select and copy their Unicode text;
+//   8. a PDF that denies copying refuses selection and says why;
+//   9. page navigation, zoom, print-preview preparation, a 100-page first/repeat
 //      search probe, a scanned-page render and repeated open/close cycles work;
-//   9. startup/first-page timings and Windows process-tree memory are recorded
+//   10. startup/first-page timings and Windows process-tree memory are recorded
 //      as observations, never treated as performance pass thresholds.
 // A screenshot, the app's log, console/log errors and a JSON report are written
 // to --out so they can be uploaded as CI evidence. Exits non-zero on any
@@ -25,6 +27,12 @@
 // Usage:
 //   node scripts/smoke-test-packaged.mjs --app <executable> [--pdf <file>]
 //        [--out <dir>] [--port <n>] [--timeout <seconds>] [--arg <switch>]...
+//        [--launch-pdf <file>] [--second-pdf <file>]
+// When --launch-pdf is given, the app is started with that file path (as a
+// double-click / Open With launch would) and the run first checks the document
+// opened; --second-pdf then starts a second process with another file and
+// checks the running window switched to it. Both probe the OS file-open
+// integration with real process launches, not the in-page drop path.
 
 import { execFileSync, execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -307,6 +315,11 @@ async function main() {
   const outDir = path.resolve(options.out ?? 'smoke-test-output');
   const port = Number(options.port ?? 9333);
   const timeoutMs = Number(options.timeout ?? 120) * 1000;
+  // OS file-open probes (Phase 9): real launch arguments, not the drop path.
+  const launchPdfPath = options['launch-pdf'] ? path.resolve(options['launch-pdf']) : null;
+  const secondPdfPath = options['second-pdf'] ? path.resolve(options['second-pdf']) : null;
+  if (launchPdfPath && !fs.existsSync(launchPdfPath)) throw new Error(`Launch PDF not found: ${launchPdfPath}`);
+  if (secondPdfPath && !fs.existsSync(secondPdfPath)) throw new Error(`Second PDF not found: ${secondPdfPath}`);
   fs.mkdirSync(outDir, { recursive: true });
 
   const pdfBytes = fs.readFileSync(pdfPath);
@@ -360,7 +373,7 @@ async function main() {
 
   const logStream = fs.createWriteStream(path.join(outDir, 'app-output.log'));
   const appLaunchStartedAt = performance.now();
-  const child = spawn(appPath, [`--remote-debugging-port=${port}`, '--enable-logging=stderr', ...options.args], {
+  const child = spawn(appPath, [`--remote-debugging-port=${port}`, '--enable-logging=stderr', ...options.args, ...(launchPdfPath ? [launchPdfPath] : [])], {
     stdio: ['ignore', 'pipe', 'pipe'],
     // Own process group on POSIX so the whole tree can be stopped; taskkill /T on Windows.
     detached: process.platform !== 'win32',
@@ -577,7 +590,7 @@ async function main() {
     const shell = await evaluate(`({
       title: document.title,
       protocol: location.protocol,
-      bridge: ['openFile', 'readFile', 'readSample', 'printPdf', 'savePdf'].every((name) => typeof window.cambuzAPI?.[name] === 'function'),
+      bridge: ['openFile', 'readFile', 'readSample', 'printPdf', 'savePdf', 'rendererReady', 'onOpenFilePath'].every((name) => typeof window.cambuzAPI?.[name] === 'function'),
     })`);
     record('window title is "Cambuz PDF Reader"', shell.title === 'Cambuz PDF Reader', shell.title);
     record('preload bridge (window.cambuzAPI) is exposed', shell.bridge);
@@ -593,6 +606,58 @@ async function main() {
       await evaluate(`document.getElementById('btn-close').click(); true`);
       await waitFor('the welcome screen to return', () => evaluate(`getComputedStyle(document.getElementById('welcome-screen')).display !== 'none'`));
     };
+
+    // 3b. OS file-open probes (Phase 9). The app was started with --launch-pdf
+    // exactly as a double-click / Open With launch starts it; a second process
+    // with --second-pdf exercises the single-instance handoff. Both run before
+    // the drop-driven suite so the launch state is observed first.
+    if (launchPdfPath) {
+      const launchName = path.basename(launchPdfPath);
+      const launchExpectedPages = (await PDFDocument.load(fs.readFileSync(launchPdfPath), { ignoreEncryption: true })).getPageCount();
+      try {
+        const launched = await waitFor(`the launch PDF ${launchName} to open and render page 1`, async () => {
+          const current = await inPage(viewerState);
+          return current.file.startsWith(launchName) && current.pages === launchExpectedPages &&
+            current.status.startsWith('Page 1 of') && current.canvasWidth > 0 && current.canvasHeight > 0
+            ? current
+            : null;
+        });
+        record('launching with a PDF path opens the document', true, `${launched.pages} page(s): ${launchName}`);
+      } catch (error) {
+        const state = await inPage(viewerState).catch(() => ({ file: '(unknown)', status: '(unknown)' }));
+        record('launching with a PDF path opens the document', false, `${error.message} (file "${state.file}", status "${state.status}")`);
+      }
+    }
+    if (secondPdfPath) {
+      const secondName = path.basename(secondPdfPath);
+      const secondExpectedPages = (await PDFDocument.load(fs.readFileSync(secondPdfPath), { ignoreEncryption: true })).getPageCount();
+      try {
+        // No debugging port: the second process must hand off and exit on its own.
+        const second = spawn(appPath, [...options.args, secondPdfPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+        second.stdout.on('data', (chunk) => logStream.write(`[second-instance] ${chunk}`));
+        second.stderr.on('data', (chunk) => logStream.write(`[second-instance] ${chunk}`));
+        const secondExit = await new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            try { second.kill(); } catch { /* already gone */ }
+            resolve({ code: 'timeout' });
+          }, 60000);
+          second.on('exit', (code, signal) => { clearTimeout(timer); resolve({ code, signal }); });
+          second.on('error', (error) => { clearTimeout(timer); resolve({ code: `spawn error: ${error.message}` }); });
+        });
+        record('a second launch hands off and exits', secondExit.code === 0, `second process exit: ${secondExit.code ?? secondExit.signal}`);
+        const switched = await waitFor('the running window to switch to the second PDF', async () => {
+          const current = await inPage(viewerState);
+          return current.file.startsWith(secondName) && current.pages === secondExpectedPages &&
+            current.status.startsWith('Page 1 of') && current.canvasWidth > 0 && current.canvasHeight > 0
+            ? current
+            : null;
+        });
+        record('opening a second PDF while running switches the document', true, `${switched.pages} page(s): ${secondName}`);
+      } catch (error) {
+        record('opening a second PDF while running switches the document', false, error.message);
+      }
+    }
+
     await closeDocument();
     memorySnapshot('settled welcome-screen idle');
     const dropDocument = async (bytes, name) => {

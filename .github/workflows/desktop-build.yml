@@ -30,9 +30,9 @@ jobs:
     name: Regression tests (Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      # Tests run without the Electron binary; packaging jobs download it.
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    # Tests stub the `electron` module, so no Electron binary is needed: the
+    # package no longer downloads one at install time (Electron 42+ fetches it
+    # on first run instead), and electron-builder fetches its own copy.
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -59,6 +59,15 @@ jobs:
         run: npm run build:win
       - name: Verify packaged contents
         run: node scripts/check-packaged-app.mjs dist/win-unpacked/resources/app.asar
+      - name: Verify runtime license files ship next to the executable
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/win-unpacked -File | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+          $licenses = @((Get-ChildItem dist/win-unpacked -File | Where-Object { $_.Name -like 'LICENSE*' }))
+          if ($licenses.Count -eq 0) { throw 'No Electron LICENSE files in win-unpacked; third-party runtime notices would not ship' }
+          Write-Host "LICENSE files: $($licenses.Name -join ', ')"
+      - name: Prepare OS file-open probe PDFs
+        run: node -e "const fs=require('fs');const path=require('path');const dir=path.join(process.env.RUNNER_TEMP,'cambuz-launch');fs.mkdirSync(dir,{recursive:true});const target=path.join(dir,'fichier-été.pdf');fs.copyFileSync('samples/hindi-sample.pdf',target);console.log(target)"
       - name: Write SHA-256 checksums
         shell: pwsh
         run: |
@@ -86,7 +95,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Smoke test the unpacked build
-        run: node scripts/smoke-test-packaged.mjs --app "dist/win-unpacked/Cambuz PDF Reader.exe" --out smoke/win-unpacked --port 9331 --timeout 180
+        shell: pwsh
+        run: |
+          $launchPdf = Join-Path $env:RUNNER_TEMP 'cambuz-launch\fichier-été.pdf'
+          $secondPdf = Join-Path $env:GITHUB_WORKSPACE 'samples\punjabi-sample.pdf'
+          node scripts/smoke-test-packaged.mjs --app "dist/win-unpacked/Cambuz PDF Reader.exe" --out smoke/win-unpacked --port 9331 --timeout 180 --launch-pdf $launchPdf --second-pdf $secondPdf
       - name: Install silently, smoke test the installed app, uninstall
         shell: pwsh
         run: |
@@ -96,19 +109,40 @@ jobs:
           if ($install.ExitCode -ne 0) { throw "Installer exited with code $($install.ExitCode)" }
           $exe = Join-Path $target 'Cambuz PDF Reader.exe'
           if (-not (Test-Path $exe)) { throw "Installed executable not found: $exe" }
-          node scripts/smoke-test-packaged.mjs --app $exe --out smoke/installed --port 9332 --timeout 180
+          # Application name, publisher and version stamped on the executable.
+          $versionInfo = (Get-Item $exe).VersionInfo
+          Write-Host "ProductName=$($versionInfo.ProductName) FileVersion=$($versionInfo.FileVersion) CompanyName=$($versionInfo.CompanyName) LegalCopyright=$($versionInfo.LegalCopyright)"
+          if ($versionInfo.ProductName -ne 'Cambuz PDF Reader') { throw "Unexpected ProductName: $($versionInfo.ProductName)" }
+          if ($versionInfo.FileVersion -notlike '1.1.0*') { throw "Unexpected FileVersion: $($versionInfo.FileVersion)" }
+          if ([string]::IsNullOrWhiteSpace($versionInfo.CompanyName)) { throw 'CompanyName (publisher) is empty on the installed executable' }
+          # Start Menu shortcut (per-user install) and .pdf file association.
+          $startMenuLink = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Cambuz PDF Reader.lnk'
+          if (-not (Test-Path $startMenuLink)) { throw "Start Menu shortcut not found: $startMenuLink" }
+          $pdfProgId = $null
+          if (Test-Path 'HKCU:\Software\Classes\.pdf') { $pdfProgId = (Get-ItemProperty 'HKCU:\Software\Classes\.pdf' -ErrorAction Stop).'(default)' }
+          if ($pdfProgId -ne 'CambuzPDFReader.Document') { throw "Expected .pdf ProgId 'CambuzPDFReader.Document', got '$pdfProgId'" }
+          $openCommand = (Get-ItemProperty 'HKCU:\Software\Classes\CambuzPDFReader.Document\shell\open\command' -ErrorAction Stop).'(default)'
+          if ($openCommand -notlike '*Cambuz PDF Reader.exe*') { throw "Unexpected .pdf open command: $openCommand" }
+          Write-Host ".pdf association registered: $pdfProgId -> $openCommand"
+          $launchPdf = Join-Path $env:RUNNER_TEMP 'cambuz-launch\fichier-été.pdf'
+          $secondPdf = Join-Path $env:GITHUB_WORKSPACE 'samples\punjabi-sample.pdf'
+          node scripts/smoke-test-packaged.mjs --app $exe --out smoke/installed --port 9332 --timeout 180 --launch-pdf $launchPdf --second-pdf $secondPdf
           $smokeExit = $LASTEXITCODE
           $uninstaller = Join-Path $target 'Uninstall Cambuz PDF Reader.exe'
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/S') -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with code $($uninstall.ExitCode)" }
           for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
           if (Test-Path $exe) { throw 'Installed application still present after uninstall' }
+          if (Test-Path $startMenuLink) { throw 'Start Menu shortcut still present after uninstall' }
+          if (Test-Path 'HKCU:\Software\Classes\CambuzPDFReader.Document') { throw 'File association still present after uninstall' }
           if ($smokeExit -ne 0) { throw "Smoke test failed for the installed application (exit $smokeExit)" }
       - name: Smoke test the portable executable
         shell: pwsh
         run: |
           $portable = Get-ChildItem dist -Filter '*-portable.exe' -File | Select-Object -First 1
-          node scripts/smoke-test-packaged.mjs --app $portable.FullName --out smoke/portable --port 9333 --timeout 180
+          $launchPdf = Join-Path $env:RUNNER_TEMP 'cambuz-launch\fichier-été.pdf'
+          $secondPdf = Join-Path $env:GITHUB_WORKSPACE 'samples\punjabi-sample.pdf'
+          node scripts/smoke-test-packaged.mjs --app $portable.FullName --out smoke/portable --port 9333 --timeout 180 --launch-pdf $launchPdf --second-pdf $secondPdf
       - name: Upload smoke-test evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -152,10 +186,24 @@ jobs:
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+      - name: Verify desktop entry, icons and mime wiring inside the AppImage
+        run: |
+          cd dist
+          appimage=$(ls *.AppImage | head -n 1)
+          ./"$appimage" --appimage-extract 'cambuz-pdf-reader.desktop' >/dev/null
+          ./"$appimage" --appimage-extract 'usr/share/icons/hicolor/*/apps/cambuz-pdf-reader.png' >/dev/null
+          ./"$appimage" --appimage-extract 'usr/share/mime/packages/cambuz-pdf-reader.xml' >/dev/null
+          grep -H '^Icon=cambuz-pdf-reader$' squashfs-root/cambuz-pdf-reader.desktop
+          grep -H 'MimeType=.*application/pdf' squashfs-root/cambuz-pdf-reader.desktop
+          test -n "$(find squashfs-root/usr/share/icons -name 'cambuz-pdf-reader.png' | head -n 1)"
+          grep -H 'mime-type type="application/pdf"' squashfs-root/usr/share/mime/packages/cambuz-pdf-reader.xml
+          grep -H 'glob pattern="\*.pdf"' squashfs-root/usr/share/mime/packages/cambuz-pdf-reader.xml
       - name: Install virtual display
         run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Prepare OS file-open probe PDFs
+        run: node -e "const fs=require('fs');const path=require('path');const dir=path.join(process.env.RUNNER_TEMP,'cambuz-launch');fs.mkdirSync(dir,{recursive:true});const target=path.join(dir,'fichier-été.pdf');fs.copyFileSync('samples/hindi-sample.pdf',target);console.log(target)"
       - name: Smoke test the unpacked build under Xvfb
-        run: xvfb-run -a node scripts/smoke-test-packaged.mjs --app dist/linux-unpacked/cambuz-pdf-reader --arg --no-sandbox --out smoke/linux --port 9335 --timeout 180
+        run: xvfb-run -a node scripts/smoke-test-packaged.mjs --app dist/linux-unpacked/cambuz-pdf-reader --arg --no-sandbox --out smoke/linux --port 9335 --timeout 180 --launch-pdf "$RUNNER_TEMP/cambuz-launch/fichier-été.pdf" --second-pdf "$GITHUB_WORKSPACE/samples/punjabi-sample.pdf"
       - name: Upload smoke-test evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -182,6 +230,12 @@ jobs:
         run: npm run build:mac
       - name: Verify packaged contents
         run: node scripts/check-packaged-app.mjs "dist/mac-arm64/Cambuz PDF Reader.app/Contents/Resources/app.asar"
+      - name: Verify document types and icon wiring (build only, app not launched)
+        run: |
+          APP="dist/mac-arm64/Cambuz PDF Reader.app"
+          test -f "$APP/Contents/Resources/icon.icns"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDocumentTypes:0:CFBundleTypeExtensions" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDocumentTypes:0:CFBundleTypeRole" "$APP/Contents/Info.plist" | grep -q Viewer
       - name: Write SHA-256 checksums
         run: |
           cd dist

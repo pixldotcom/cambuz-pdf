@@ -23,8 +23,12 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const stageDir = path.join(repoRoot, '.build-app');
 const nodeModulesDir = path.join(stageDir, 'node_modules');
 
-const RUNTIME_FILES = ['main.js', 'preload.js', 'package-lock.json'];
+const RUNTIME_FILES = ['main.js', 'preload.js', 'package-lock.json', 'LICENSE', 'THIRD-PARTY-NOTICES.md'];
 const RUNTIME_DIRS = ['src'];
+// The window/taskbar icon referenced by main.js (`assets/icon.png`). The
+// per-platform installer icons live in build/ and are read by electron-builder
+// directly; they are not part of the runtime payload.
+const RUNTIME_ASSETS = ['icon.png'];
 // Every sample the welcome-screen buttons can open (src/bundled-samples.cjs).
 const RUNTIME_SAMPLES = BUNDLED_SAMPLES;
 // The renderer loads only PDF.js's build/ (non-legacy) and standard_fonts/. The
@@ -63,6 +67,23 @@ function removeNativeCanvasScopes(dir) {
   }
 }
 
+// `npm ci --omit=dev --omit=optional` leaves the scope folders of skipped
+// packages behind as empty directories. They carry no runtime value, so sweep
+// them (and any other emptied folder) rather than shipping clutter in the asar.
+function removeEmptyDirectories(dir) {
+  let removed = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const full = path.join(dir, entry.name);
+    removed += removeEmptyDirectories(full);
+    if (fs.readdirSync(full).length === 0) {
+      fs.rmdirSync(full);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 function directorySize(dir) {
   let bytes = 0;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -73,8 +94,24 @@ function directorySize(dir) {
 }
 
 function main() {
+  // Fail fast when a packaging input is missing: electron-builder would
+  // otherwise fall back to its default icon or ship without notices.
+  for (const resource of [
+    'LICENSE',
+    'THIRD-PARTY-NOTICES.md',
+    'assets/icon.png',
+    'build/icon.ico',
+    'build/icon.icns',
+    'build/icon.png',
+  ]) {
+    if (!fs.existsSync(path.join(repoRoot, resource))) {
+      throw new Error(`Staging failed: required packaging resource is missing: ${resource}`);
+    }
+  }
+
   fs.rmSync(stageDir, { recursive: true, force: true });
   fs.mkdirSync(path.join(stageDir, 'samples'), { recursive: true });
+  fs.mkdirSync(path.join(stageDir, 'assets'), { recursive: true });
 
   for (const file of RUNTIME_FILES) {
     fs.copyFileSync(path.join(repoRoot, file), path.join(stageDir, file));
@@ -84,6 +121,9 @@ function main() {
   }
   for (const sample of RUNTIME_SAMPLES) {
     fs.copyFileSync(path.join(repoRoot, 'samples', sample), path.join(stageDir, 'samples', sample));
+  }
+  for (const asset of RUNTIME_ASSETS) {
+    fs.copyFileSync(path.join(repoRoot, 'assets', asset), path.join(stageDir, 'assets', asset));
   }
 
   // Keep devDependencies in the staged manifest only long enough for `npm ci`
@@ -107,9 +147,10 @@ function main() {
   const mapsRemoved = removeFilesMatching(nodeModulesDir, (name) => name.endsWith('.map'));
 
   removeNativeCanvasScopes(nodeModulesDir);
+  const emptyDirsRemoved = removeEmptyDirectories(nodeModulesDir);
 
   const sizeMiB = (directorySize(stageDir) / 1048576).toFixed(1);
-  console.log(`Staged runtime app in .build-app/ (${sizeMiB} MiB, ${mapsRemoved} source map(s) removed).`);
+  console.log(`Staged runtime app in .build-app/ (${sizeMiB} MiB, ${mapsRemoved} source map(s) and ${emptyDirsRemoved} empty director(ies) removed).`);
 }
 
 main();
