@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Cambuz PDF Reader logo" width="96" height="96" />
+  <img src="https://github.com/rajeshkamboj/cambuz-pdf/raw/main/assets/icon.png" alt="Cambuz PDF Reader logo" width="96" height="96" />
 </p>
 
 <h1 align="center">Cambuz PDF Reader</h1>
