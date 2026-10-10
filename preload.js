@@ -1,6 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// The OS regional locale forwarded by main.js (see systemLocaleArguments).
+const LOCALE_SWITCH = '--cambuz-system-locale=';
+const localeArgument = process.argv.find((arg) => arg.startsWith(LOCALE_SWITCH));
+
 contextBridge.exposeInMainWorld('cambuzAPI', {
+  systemLocale: localeArgument ? localeArgument.slice(LOCALE_SWITCH.length) : undefined,
   openFile: () => ipcRenderer.invoke('dialog-open-file'),
   readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
   readSample: (name) => ipcRenderer.invoke('read-sample', name),

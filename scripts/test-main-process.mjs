@@ -122,6 +122,7 @@ const fakeElectron = {
     quit: () => appQuitCalls.push(Date.now()),
     getVersion: () => APP_VERSION_UNDER_TEST,
     requestSingleInstanceLock: () => true,
+    getSystemLocale: () => 'en-IN',
   },
   BrowserWindow: FakeBrowserWindow,
   ipcMain: {
@@ -264,6 +265,10 @@ console.log('\n## Main process: window security guards');
   assert(window?.options?.webPreferences?.nodeIntegration === false, 'Node integration stays disabled');
   assert(window?.options?.webPreferences?.webSecurity !== false, 'webSecurity is never disabled');
   assert(window?.options?.webPreferences?.sandbox === true, 'the main window renderer runs in the Chromium sandbox');
+  assert(
+    JSON.stringify(window?.options?.webPreferences?.additionalArguments) === JSON.stringify(['--cambuz-system-locale=en-IN']),
+    'the OS regional locale is forwarded to the preload (only en-US Chromium locale data ships)',
+  );
 
   const openHandler = window?.webContents?.windowOpenHandler;
   assert(typeof openHandler === 'function', 'a window-open handler is registered');
@@ -350,6 +355,19 @@ console.log('\n## Main process: opening PDFs from the OS');
 }
 
 console.log('\n## Preload bridge');
+// The forwarded locale is read from the renderer's argv; check that path in a
+// fresh copy of the preload, then load the normal one for the remaining checks.
+{
+  const preloadPath = path.join(repoRoot, 'preload.js');
+  process.argv.push('--cambuz-system-locale=hi-IN');
+  try {
+    require(preloadPath);
+    assert(exposed.cambuzAPI?.systemLocale === 'hi-IN', 'the preload bridge exposes the forwarded systemLocale');
+  } finally {
+    process.argv.pop();
+    delete require.cache[require.resolve(preloadPath)];
+  }
+}
 require(path.join(repoRoot, 'preload.js'));
 {
   const api = exposed.cambuzAPI;
@@ -360,6 +378,7 @@ require(path.join(repoRoot, 'preload.js'));
     assert(call && call.channel === 'read-sample' && call.args[0] === 'cambuz-demo.pdf', 'readSample forwards the name to the read-sample channel');
   }
   assert(typeof api?.readFile === 'function', 'the preload bridge still exposes readFile');
+  assert(api?.systemLocale === undefined, 'systemLocale is undefined when main.js forwarded no locale');
   assert(typeof api?.rendererReady === 'function', 'the preload bridge exposes rendererReady');
   if (api && typeof api.rendererReady === 'function') {
     await api.rendererReady();

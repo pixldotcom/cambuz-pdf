@@ -36,8 +36,12 @@ export function makeId(name, size, mtime) {
   return `r${(h1 >>> 0).toString(36)}${(h2 >>> 0).toString(36)}`;
 }
 
-/** Human-readable relative time, e.g. "2 hours ago". */
-export function timeAgo(ts) {
+/**
+ * Human-readable relative time, e.g. "2 hours ago". Older entries show a date in
+ * `locale` (the OS regional locale in the desktop app), falling back to the
+ * runtime default when it is missing or invalid.
+ */
+export function timeAgo(ts, locale) {
   const diff = Date.now() - ts;
   if (diff < 0) return 'just now';
   const min = Math.floor(diff / 60000);
@@ -48,7 +52,11 @@ export function timeAgo(ts) {
   const d = Math.floor(h / 24);
   if (d < 30) return `${d} day${d === 1 ? '' : 's'} ago`;
   const date = new Date(ts);
-  return date.toLocaleDateString();
+  try {
+    return date.toLocaleDateString(locale || undefined);
+  } catch (_) {
+    return date.toLocaleDateString();
+  }
 }
 
 /** Human-readable byte size, e.g. "1.2 MB". */
