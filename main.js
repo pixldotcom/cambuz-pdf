@@ -28,6 +28,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Explicit (also Electron's default): the page runs in the Chromium sandbox.
+      sandbox: true,
     },
     backgroundColor: '#1e1e2e',
     show: false,

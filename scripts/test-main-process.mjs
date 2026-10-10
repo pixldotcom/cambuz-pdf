@@ -211,6 +211,7 @@ console.log('\n## Main process: window security guards');
   assert(window?.options?.webPreferences?.contextIsolation === true, 'context isolation stays enabled');
   assert(window?.options?.webPreferences?.nodeIntegration === false, 'Node integration stays disabled');
   assert(window?.options?.webPreferences?.webSecurity !== false, 'webSecurity is never disabled');
+  assert(window?.options?.webPreferences?.sandbox === true, 'the main window renderer runs in the Chromium sandbox');
 
   const openHandler = window?.webContents?.windowOpenHandler;
   assert(typeof openHandler === 'function', 'a window-open handler is registered');
