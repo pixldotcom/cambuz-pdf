@@ -72,6 +72,13 @@ class FakeWebContents {
   getURL() {
     return FAKE_START_URL;
   }
+  async getPrintersAsync() {
+    return [{ name: 'test-printer', displayName: 'Test printer', options: {} }];
+  }
+  print(options, callback) {
+    this.printOptions = options;
+    callback(true);
+  }
 }
 class FakeBrowserWindow {
   constructor(options) {
@@ -90,6 +97,9 @@ class FakeBrowserWindow {
   on() {}
   isDestroyed() {
     return this.destroyed;
+  }
+  destroy() {
+    this.destroyed = true;
   }
   isMinimized() {
     return this.minimized;
@@ -192,6 +202,38 @@ console.log('\n## Main process: read-file is unchanged');
   assert(result.ok === true && result.name === 'welcome.pdf' && result.size === fs.statSync(welcome).size, 'read-file still reads a chosen file');
   const missing = await handlers.get('read-file')({}, path.join(repoRoot, 'samples', 'missing.pdf'));
   assert(missing.ok === false, 'read-file reports a missing file');
+}
+
+console.log('\n## Main process: native print options (no physical printer)');
+{
+  const print = handlers.get('print-pdf');
+  const bytes = new Uint8Array(fs.readFileSync(path.join(repoRoot, 'samples', 'welcome.pdf')));
+  const base = { deviceName: 'test-printer', paperSize: 'A4', orientation: 'portrait', copies: 2 };
+  assert((await handlers.get('list-printers')({ sender: createdWindows[0].webContents }))[0].name === 'test-printer', 'printer enumeration returns system device names');
+  for (const duplexMode of ['simplex', 'longEdge', 'shortEdge']) {
+    const result = await print({}, bytes, { ...base, duplexMode, collate: false });
+    const window = createdWindows.at(-1);
+    assert(result.ok && window.webContents.printOptions.duplexMode === duplexMode &&
+      window.webContents.printOptions.collate === false && window.webContents.printOptions.copies === 2,
+    `direct print forwards ${duplexMode}, copies and uncollated setting to Electron`);
+    assert(window.webContents.printOptions.silent === true && window.options.icon.endsWith(path.join('assets', 'icon.png')),
+      'direct print uses selected device and branded transient window');
+    assert(!fs.existsSync(path.dirname(window.loadedFile)), 'temporary print PDF is removed after the job');
+  }
+  const dialogResult = await print({}, bytes, { ...base, deviceName: '', duplexMode: 'longEdge', collate: true });
+  assert(dialogResult.ok && createdWindows.at(-1).webContents.printOptions.silent === false &&
+    createdWindows.at(-1).webContents.printOptions.duplexMode === 'longEdge' &&
+    createdWindows.at(-1).webContents.printOptions.collate === true, 'system dialog receives initial duplex and collation choices');
+  const before = createdWindows.length;
+  for (const [options, message] of [
+    [{ ...base, duplexMode: 'invalid' }, 'Unsupported two-sided'],
+    [{ ...base, collate: 'false' }, 'Collate must'],
+    [{ ...base, deviceName: 'missing' }, 'no longer available'],
+  ]) {
+    const result = await print({}, bytes, options);
+    assert(!result.ok && result.error.includes(message) && createdWindows.length === before,
+      `invalid print request rejected before opening a print window: ${message}`);
+  }
 }
 
 console.log('\n## Main process: page context menu');

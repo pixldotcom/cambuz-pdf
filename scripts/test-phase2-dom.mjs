@@ -87,7 +87,8 @@ const PRINT_IDS = [
   'print-dialog', 'print-document-label', 'btn-print-close', 'btn-print-cancel',
   'btn-print-current', 'btn-print-submit', 'btn-print-download', 'print-preset',
   'print-current-page-label', 'print-page-range', 'print-range-error',
-  'print-printer', 'btn-refresh-printers', 'print-copies', 'print-paper',
+  'print-printer', 'btn-refresh-printers', 'print-copies', 'print-collate',
+  'print-duplex', 'print-duplex-help', 'print-paper',
   'print-orientation', 'print-pages-per-sheet', 'print-scaling',
   'print-custom-scale', 'print-margins', 'print-custom-margin',
   'print-ink-saver', 'print-settings-error', 'print-preview-summary',
@@ -121,6 +122,11 @@ const printController = new PrintController({
 assert(!printController.isOpen, 'print controller starts closed');
 const validPrintForm = printController.validateSettings(printController.readSettings());
 assert(validPrintForm.valid && validPrintForm.summary.selectedCount === 5, 'default print form validates all pages');
+assert(validPrintForm.settings.duplexMode === 'simplex' && validPrintForm.settings.collate, 'print defaults are one-sided and collated');
+printController.applySettingsToForm({ ...validPrintForm.settings, duplexMode: 'shortEdge', collate: false, copies: 2 });
+assert(printController.readSettings().duplexMode === 'shortEdge' && !printController.readSettings().collate, 'two-sided and collation controls round-trip through the form');
+assert(printController.previewKey({ ...validPrintForm.settings, duplexMode: 'longEdge', collate: false, copies: 3 }) ===
+  printController.previewKey(validPrintForm.settings), 'native job choices do not regenerate the preview PDF');
 const invalidRangeForm = printController.validateSettings({ ...printController.readSettings(), pageMode: 'range', pageRange: '0' });
 assert(!invalidRangeForm.valid && document.getElementById('print-range-error').textContent.includes('between 1 and 5'), 'print dialog shows invalid page-range feedback');
 printController.applySettingsToForm({ ...printController.readSettings(), pageMode: 'all', pageRange: '' });

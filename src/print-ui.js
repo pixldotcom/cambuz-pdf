@@ -86,6 +86,9 @@ export class PrintController {
       refreshPrinters: element('btn-refresh-printers'),
       printerHelp: element('print-printer-help'),
       copies: element('print-copies'),
+      collate: element('print-collate'),
+      duplex: element('print-duplex'),
+      duplexHelp: element('print-duplex-help'),
       paper: element('print-paper'),
       orientation: element('print-orientation'),
       pagesPerSheet: element('print-pages-per-sheet'),
@@ -153,6 +156,8 @@ export class PrintController {
     const refreshOnInput = [
       this.ui.pageRange,
       this.ui.copies,
+      this.ui.collate,
+      this.ui.duplex,
       this.ui.paper,
       this.ui.orientation,
       this.ui.pagesPerSheet,
@@ -264,6 +269,8 @@ export class PrintController {
       pageMode: selectedMode ? selectedMode.value : 'all',
       pageRange: this.ui.pageRange.value,
       copies: this.ui.copies.value,
+      collate: this.ui.collate.checked,
+      duplexMode: this.ui.duplex.value,
       paperSize: this.ui.paper.value,
       orientation: this.ui.orientation.value,
       scaling: this.ui.scaling.value,
@@ -280,6 +287,8 @@ export class PrintController {
     for (const radio of this.ui.pageModes) radio.checked = radio.value === value.pageMode;
     this.ui.pageRange.value = value.pageRange || '';
     this.ui.copies.value = value.copies;
+    this.ui.collate.checked = value.collate;
+    this.ui.duplex.value = value.duplexMode;
     this.ui.paper.value = value.paperSize;
     this.ui.orientation.value = value.orientation;
     this.ui.scaling.value = value.scaling;
@@ -319,9 +328,9 @@ export class PrintController {
   }
 
   previewKey(settings) {
-    // Copies and printer selection are native job settings; they do not change
+    // Copies, collation and duplex are printer settings; they do not change
     // the sheet PDF and should not force an expensive re-composition.
-    const { copies: _copies, ...pdfSettings } = settings;
+    const { copies: _copies, collate: _collate, duplexMode: _duplex, ...pdfSettings } = settings;
     return `${this.getDocumentGeneration()}:${this.getCurrentPage()}:${JSON.stringify(pdfSettings)}`;
   }
 
@@ -361,7 +370,9 @@ export class PrintController {
       `${paperLabel} ${dimensions.widthMm} × ${dimensions.heightMm} mm · ${orientation} · ` +
       `${settings.pagesPerSheet} page${settings.pagesPerSheet === 1 ? '' : 's'} per sheet · ` +
       `${settings.scaling === 'fit' ? 'Fit to printable area' : settings.scaling === 'actual' ? 'Actual size' : `${settings.customScale}% scale`}` +
-      `${settings.inkSaver ? ' · Ink Saver grayscale' : ''}`;
+      `${settings.inkSaver ? ' · Ink Saver grayscale' : ''}` +
+      ` · ${settings.duplexMode === 'simplex' ? 'one-sided' : settings.duplexMode === 'longEdge' ? 'two-sided, long edge' : 'two-sided, short edge'}` +
+      `${summary.copies > 1 ? settings.collate ? ' · collated' : ' · uncollated' : ''}`;
   }
 
   updateActionState() {
@@ -607,7 +618,7 @@ export class PrintController {
       option.textContent = 'System print dialog';
       this.ui.printer.appendChild(option);
       this.ui.printer.disabled = true;
-      this.ui.printerHelp.textContent = 'Browser mode cannot enumerate printers. Print opens the system print dialog.';
+      this.ui.printerHelp.textContent = 'Browser mode cannot set printer options. Choose sides, copies and collation in the browser/system print dialog.';
       this.updateActionState();
       return;
     }
@@ -634,7 +645,7 @@ export class PrintController {
       else this.ui.printer.value = '';
       this.ui.printer.disabled = false;
       this.ui.printerHelp.textContent = printers.length
-        ? 'Cambuz uses the selected Windows printer and sends the prepared pages as a print-ready PDF.'
+        ? 'Select a printer for direct printing, or use the system dialog to verify driver options before printing.'
         : 'No printer was detected. Print opens the native system dialog so you can choose one.';
     } catch (error) {
       if (generation !== this.printersGeneration) return;
@@ -658,6 +669,7 @@ export class PrintController {
   async print(forceCurrentPage) {
     if (!this.opened || this.submitting) return;
     if (forceCurrentPage) {
+      clearTimeout(this.previewBuildTimer);
       for (const radio of this.ui.pageModes) radio.checked = radio.value === 'current';
       this.settings = this.readSettings();
       this.ui.preset.value = 'custom';
@@ -679,7 +691,11 @@ export class PrintController {
     if (!result) {
       result = await this.requestPreview(validation.settings, validation.summary);
     }
-    if (!result?.bytes || !this.opened) return;
+    // The user may have changed settings while a slow PDF was composing.
+    // Never send old sheet bytes with a new set of native printer options.
+    const current = this.validateSettings(this.readSettings());
+    if (!result?.bytes || !this.opened || !current.valid ||
+        this.previewKey(current.settings) !== key || this.latestPreviewKey !== key) return;
 
     this.submitting = true;
     this.ui.submitButton.disabled = true;
@@ -692,7 +708,9 @@ export class PrintController {
         const paper = getPaperDimensions(validation.settings);
         const nativeResult = await api.printPdf(result.bytes, {
           deviceName: this.ui.printer.value || '',
-          copies: validation.settings.copies,
+          copies: current.settings.copies,
+          collate: current.settings.collate,
+          duplexMode: current.settings.duplexMode,
           paperSize: validation.settings.paperSize,
           orientation: validation.settings.orientation,
           widthMm: paper.widthMm,
@@ -700,7 +718,7 @@ export class PrintController {
         });
         if (!nativeResult?.ok) throw new Error(nativeResult?.error || 'The operating system could not start the print job.');
         const destination = nativeResult.printerName || this.ui.printer.value || 'selected printer';
-        this.setStatus(`Print job sent to ${destination}.`, false);
+        this.setStatus(`Print job sent to ${destination}.${current.settings.duplexMode === 'simplex' ? '' : ' Two-sided output depends on printer/driver support.'}`, false);
         this.onStatus(`Print job sent to ${destination}`);
       } else {
         this.openBrowserPrint(result.bytes);
@@ -735,7 +753,7 @@ export class PrintController {
     }, 10 * 60 * 1000);
     try {
       popup.location.href = url;
-      this.setStatus('Print-ready PDF opened. Choose a printer in the browser print dialog; avoid extra scaling if offered.');
+      this.setStatus('Print-ready PDF opened. Set two-sided printing, copies and collation in the browser/system dialog; avoid extra scaling.');
       setTimeout(() => {
         try {
           if (!popup.closed) {
@@ -768,6 +786,6 @@ export class PrintController {
     anchor.click();
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    this.setStatus('Print-ready PDF downloaded. Its pages already include your selected page range, paper layout, scaling and margins.');
+    this.setStatus('Print-ready PDF downloaded with your page selection and layout. Choose duplex, copies and collation when printing it.');
   }
 }

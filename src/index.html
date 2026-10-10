@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cambuz PDF Reader</title>
+  <link rel="icon" type="image/png" href="../assets/icon.png">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="print.css">
   <link rel="stylesheet" href="pdf-ops.css">
@@ -415,6 +416,20 @@
               </select>
             </div>
           </div>
+
+          <div class="print-field">
+            <label for="print-duplex">Print on both sides</label>
+            <select id="print-duplex" aria-describedby="print-duplex-help">
+              <option value="simplex">Off · one-sided</option>
+              <option value="longEdge">On · flip on long edge (book)</option>
+              <option value="shortEdge">On · flip on short edge (calendar)</option>
+            </select>
+            <p id="print-duplex-help" class="print-help">Requires a duplex-capable printer. In the system dialog, check the driver's two-sided setting before printing.</p>
+          </div>
+          <label class="print-checkbox-row print-field">
+            <input id="print-collate" type="checkbox" checked>
+            <span><strong>Collate copies</strong><small>Print each complete set in order when making multiple copies.</small></span>
+          </label>
 
           <div class="print-field print-field-inline">
             <div>

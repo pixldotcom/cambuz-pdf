@@ -130,6 +130,10 @@ assert(millimetresToMicrons(210) === 210000, 'native printer paper dimensions co
 const grayPixels = grayscaleRgbaInPlace(new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 128]));
 assert(grayPixels[0] === grayPixels[1] && grayPixels[1] === grayPixels[2], 'Ink Saver converts RGB pixels to grayscale');
 assert(grayPixels[4] === grayPixels[5] && grayPixels[5] === grayPixels[6] && grayPixels[7] === 255, 'grayscale conversion makes output pixels opaque');
+assert(normalizePrintSettings({ ...PRINT_DEFAULTS, duplexMode: 'longEdge', collate: false }).duplexMode === 'longEdge', 'two-sided long-edge and uncollated choices are accepted');
+assert(normalizePrintSettings({ ...PRINT_DEFAULTS, duplexMode: 'shortEdge' }).duplexMode === 'shortEdge', 'two-sided short-edge choice is accepted');
+throws(() => normalizePrintSettings({ ...PRINT_DEFAULTS, duplexMode: 'two-sided' }), 'one-sided', 'invalid duplex mode rejected');
+throws(() => normalizePrintSettings({ ...PRINT_DEFAULTS, collate: 'false' }), 'Collate must', 'non-boolean collation rejected');
 throws(() => normalizePrintSettings({ ...PRINT_DEFAULTS, copies: 0 }), 'Copies must', 'zero copies rejected');
 throws(() => normalizePrintSettings({ ...PRINT_DEFAULTS, copies: 100 }), 'Copies must', 'copies above the limit rejected');
 throws(() => normalizePrintSettings({ ...PRINT_DEFAULTS, pagesPerSheet: 3 }), 'Pages per sheet', 'unsupported N-up setting rejected');

@@ -11,10 +11,8 @@ script only rescales it to the formats the packaging setup requires:
   build/icon.ico    16-256 ICO    Windows installer, exe, shortcut, taskbar
   build/icon.icns   32-1024 ICNS  macOS bundle icon (Dock, Finder, title bar)
 
-Known limitation of the source asset: the master is a 1254x1254 RGB PNG with
-no alpha channel — the artwork is a full-bleed tile with its own dark
-background, so there is nothing to key out. The conversions are therefore
-straight opaque rescales; no transparency is invented and nothing is cropped.
+The master is an RGBA PNG with transparent corners. Preserve its alpha in
+all derived formats; never add a background, key out colours or crop artwork.
 
 The script fails with a clear error when the master is missing or unusable, so
 packaging can never silently fall back to a generic icon. Regenerate the assets
@@ -76,7 +74,10 @@ def load_master():
             f"assets/icon-master.png is {width}x{height}; at least {MIN_MASTER}x{MIN_MASTER}\n"
             f"  is needed for a sharp macOS 1024px (ic10) entry without upscaling."
         )
-    return master.convert("RGBA")
+    master = master.convert("RGBA")
+    if master.getchannel("A").getextrema()[0] == 255:
+        die("assets/icon-master.png must contain transparency; check that the transparent master is in place.")
+    return master
 
 
 def main():
