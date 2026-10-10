@@ -247,14 +247,7 @@ function createWindow() {
         { type: 'separator' },
         {
           label: 'About Cambuz PDF Reader',
-          click: () => {
-            dialog.showMessageBox(mainWindow, {
-              type: 'info',
-              title: 'About Cambuz PDF Reader',
-              message: `Cambuz PDF Reader v${app.getVersion()}`,
-              detail: 'A lightweight, fast PDF reader.\nRead. Search. Print. Done.',
-            });
-          },
+          click: () => showAboutWindow(),
         },
       ],
     },
@@ -263,6 +256,48 @@ function createWindow() {
   // macOS only: restore the application menu (Quit) and Edit copy/paste roles.
   const menu = Menu.buildFromTemplate(applyMacMenuRoles(template, process.platform, 'Cambuz PDF Reader'));
   Menu.setApplicationMenu(menu);
+}
+
+// Help → About Cambuz PDF Reader: a small sandboxed dialog (src/about.html)
+// showing the official icon, the product identity and the version of the
+// running application (app.getVersion(), passed in the page query string —
+// never hard-coded). It is a local page with no remote content; the website
+// link leaves the app through the same policy as the main window: http(s)
+// URLs open in the system browser and every other navigation is denied, so
+// the site is never rendered inside the app.
+function showAboutWindow() {
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const about = new BrowserWindow({
+    width: 420,
+    height: 470,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    minimizable: false,
+    title: 'About Cambuz PDF Reader',
+    icon: path.join(__dirname, 'assets', 'icon.png'),
+    backgroundColor: '#1e1e2e',
+    autoHideMenuBar: true,
+    parent,
+    modal: Boolean(parent),
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  about.loadFile(path.join(__dirname, 'src', 'about.html'), {
+    query: { version: app.getVersion() },
+  });
+  about.once('ready-to-show', () => about.show());
+  about.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      shell.openExternal(url).catch(() => {});
+    }
+    return { action: 'deny' };
+  });
+  about.webContents.on('will-navigate', (event) => event.preventDefault());
 }
 
 // IPC handlers

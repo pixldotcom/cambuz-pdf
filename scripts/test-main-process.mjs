@@ -82,7 +82,10 @@ class FakeBrowserWindow {
     this.destroyed = false;
     createdWindows.push(this);
   }
-  loadFile() {}
+  loadFile(file, options) {
+    this.loadedFile = file;
+    this.loadOptions = options;
+  }
   once() {}
   on() {}
   isDestroyed() {
@@ -330,18 +333,66 @@ require(path.join(repoRoot, 'preload.js'));
   }
 }
 
-// Phase 10: the About dialog reports the running app version, not a literal.
+// Phase 10: the About dialog reports the running app version, not a literal,
+// and carries the official product identity (icon, creator, website).
 {
   const helpMenu = builtTemplates.flat().find((item) => item && item.label === 'Help');
   const about = helpMenu && helpMenu.submenu.find((item) => item.label === 'About Cambuz PDF Reader');
   assert(typeof about?.click === 'function', 'the Help menu has an About item');
+  const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  const pkgVersion = pkg.version;
+  const license = fs.readFileSync(path.join(repoRoot, 'LICENSE'), 'utf8');
+  const aboutPage = path.join(repoRoot, 'src', 'about.html');
+  const html = fs.readFileSync(aboutPage, 'utf8');
   if (about && typeof about.click === 'function') {
+    const windowsBefore = createdWindows.length;
     about.click();
-    const box = messageBoxes[messageBoxes.length - 1];
-    const message = box && box[1] && box[1].message;
-    assert(message === `Cambuz PDF Reader v${APP_VERSION_UNDER_TEST}`, 'About shows the app version from app.getVersion()', message);
+    assert(createdWindows.length === windowsBefore + 1, 'About opens its own dialog window');
+    const aboutWindow = createdWindows[createdWindows.length - 1];
+    assert(aboutWindow.loadedFile === aboutPage, 'About loads src/about.html');
+    assert(
+      aboutWindow.loadOptions?.query?.version === APP_VERSION_UNDER_TEST,
+      'About shows the app version from app.getVersion()',
+      String(aboutWindow.loadOptions?.query?.version),
+    );
+    assert(aboutWindow.options?.title === 'About Cambuz PDF Reader', 'the dialog is titled About Cambuz PDF Reader');
+    assert(
+      typeof aboutWindow.options?.icon === 'string'
+        && aboutWindow.options.icon.endsWith(path.join('assets', 'icon.png')),
+      'the dialog window uses the official icon',
+    );
+    assert(aboutWindow.options?.webPreferences?.contextIsolation === true, 'the About page keeps context isolation on');
+    assert(aboutWindow.options?.webPreferences?.nodeIntegration === false, 'the About page keeps Node integration off');
+    assert(aboutWindow.options?.webPreferences?.sandbox === true, 'the About page runs in the Chromium sandbox');
+    assert(aboutWindow.options?.webPreferences?.webSecurity !== false, 'the About page never disables webSecurity');
+    assert(aboutWindow.options?.webPreferences?.preload === undefined, 'the About page gets no preload bridge');
+
+    // The website must open in the system browser, never inside the app.
+    const openHandler = aboutWindow.webContents.windowOpenHandler;
+    assert(typeof openHandler === 'function', 'the About window registers a window-open handler');
+    const beforeUrls = externalUrls.length;
+    const opened = openHandler({ url: 'https://pixldot.com/' });
+    assert(opened?.action === 'deny', 'the website never renders inside the app');
+    assert(
+      externalUrls.length === beforeUrls + 1 && externalUrls[externalUrls.length - 1] === 'https://pixldot.com/',
+      'clicking the website opens the system browser',
+    );
+    const beforeOther = externalUrls.length;
+    assert(openHandler({ url: 'file:///etc/passwd' })?.action === 'deny', 'non-http(s) URLs are denied in the About window');
+    assert(externalUrls.length === beforeOther, 'only the website URL reaches the system browser');
   }
-  const pkgVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version;
+
+  // Product identity displayed in the dialog page.
+  assert(
+    html.includes('Cambuz PDF Reader') && html.includes('PDF reading without the bloat.'),
+    'About shows the product name and description',
+  );
+  assert(html.includes('Rajesh Singh'), 'About names the creator');
+  assert(html.includes('https://pixldot.com/'), 'About shows the official website');
+  assert(html.includes('assets/icon.png'), 'About shows the official icon');
+  assert(html.includes('2026 Cambuz'), 'About carries the copyright holder and year');
+  assert(license.includes('2026 Cambuz'), 'the copyright year and holder come from the LICENSE');
+  assert(!html.includes(pkgVersion), 'About contains no hard-coded version string', pkgVersion);
   assert(APP_VERSION_UNDER_TEST !== pkgVersion, 'About version is not a hard-coded package version');
 }
 

@@ -1,12 +1,14 @@
 # Cambuz PDF Reader 1.1.0 — Windows pre-release
 
 > **Unsigned pre-release. Not published.** Windows is the primary target. Linux and macOS
-> builds are **experimental**: they build and pass headless checks, but nobody has launched
-> them on a real desktop. Please read the limitations before you install.
+> builds are **experimental**: they build and pass headless checks, but they have not yet
+> been launched on a real desktop. Please read the limitations before you install.
 
 **Release candidate commit:** `ac2b848` on branch `arena/e73ef198-cambuz-pdf`
 (CI: [Desktop builds run 38032232208](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208)).
 Release docs were added in a later docs-only commit; they do not change the application.
+The official Cambuz icon and the updated About dialog were finalized after this release
+candidate; installers built by later CI runs include them.
 
 Application identity: name **Cambuz PDF Reader**, app ID **`com.cambuz.pdfreader`**,
 publisher **Cambuz**, licence **MIT**.

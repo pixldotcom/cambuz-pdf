@@ -38,8 +38,9 @@
 
 Every file is built from release candidate `ac2b848` in
 [CI run 38032232208](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208)
-(all four jobs green; the application source is identical to current `main` as of 2026-10-10 —
-only docs differ). Artifacts are **unsigned** builds — expect SmartScreen/Gatekeeper notices.
+(all four jobs green). The current source additionally carries the official Cambuz
+branding and the updated About dialog — the next CI build will include them. Artifacts
+are **unsigned** builds — expect SmartScreen/Gatekeeper notices.
 
 | Platform & architecture | Artifact | Best for | Size | Download |
 | --- | --- | --- | ---: | --- |
@@ -50,7 +51,8 @@ only docs differ). Artifacts are **unsigned** builds — expect SmartScreen/Gate
 | macOS 13+ · Apple Silicon *(experimental)* | `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | Same app bundle as a plain ZIP | 125.7 MiB | [macOS CI artifact][mac-dl] |
 | Windows arm64, Intel Mac, Linux arm64 | — | Not built | — | *unavailable* |
 
-Newer or expired links? Every push to `main` rebuilds all three platforms:
+Newer or expired links? Every push to `main` that changes application or packaging
+files rebuilds all three platforms (documentation-only commits are skipped):
 find the latest green run on the
 [Desktop builds workflow page](https://github.com/pixldotcom/cambuz-pdf/actions/workflows/desktop-build.yml).
 
@@ -167,8 +169,8 @@ Work on an in-memory copy — your file on disk is never touched until you save:
 
 ## 📸 Screenshots
 
-No screenshots are committed in this repository yet (only the app icon,
-`assets/icon.png`). The team would welcome genuine full-window captures of the welcome
+No screenshots are committed in this repository yet (only the app icon artwork in
+`assets/`). We would welcome genuine full-window captures of the welcome
 screen, a Hindi or Punjabi document open with the sidebar, and the print dialog — as
 real application captures in `assets/screenshots/`, not mockups. Until then, the sample
 PDFs in [`samples/`](samples) let you judge the rendering with your own copy of the app.
@@ -327,6 +329,25 @@ npm run serve         # browser preview of the renderer (development only)
 Contributions are welcome — please open an issue first for anything beyond a small fix,
 and keep changes covered by `npm test`. No new release or signing automation is produced
 by this documentation; publishing is a maintainer decision tracked in DEVELOPMENT.md.
+
+## 🧭 About Us
+
+Cambuz PDF Reader is developed by **Rajesh Singh** under the PixlDot brand, with a focus on making PDF reading simple, fast, and accessible.
+
+Official website: [pixldot.com](https://pixldot.com/)
+
+## 📄 License & project links
+
+Cambuz PDF Reader is released under the [MIT License](LICENSE) — Copyright © 2026 Cambuz —
+with bundled third-party components listed with full license texts in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+- Source code: [github.com/pixldotcom/cambuz-pdf](https://github.com/pixldotcom/cambuz-pdf)
+- Bug reports and feature requests: [GitHub issues](https://github.com/pixldotcom/cambuz-pdf/issues)
+- Automated builds: [Desktop builds workflow](https://github.com/pixldotcom/cambuz-pdf/actions/workflows/desktop-build.yml)
+- Developer documentation: [DEVELOPMENT.md](DEVELOPMENT.md) ·
+  [1.1.0 pre-release notes](docs/RELEASE-NOTES-1.1.0.md) ·
+  [Windows acceptance checklist](docs/WINDOWS-ACCEPTANCE-CHECKLIST.md)
 
 [win-dl]: https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662571692
 [linux-dl]: https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662201852
