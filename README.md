@@ -244,7 +244,7 @@ Honest status of the current build — details and evidence in
 | Printing | Preview, job preparation and native duplex/collation option forwarding are tested; **physical printer output is untested**. Printer capabilities and per-printer non-printable margins are not queried (duplex may be unavailable; edge clipping possible with `None` margins). System dialogs/drivers may override settings. Filled form values do not appear in print — save the filled copy and print that. |
 | Search | Substring, case-insensitive, NFC-normalized; no regex, whole-word or diacritic-insensitive modes. |
 | Forms | AcroForm basics only: XFA/dynamic forms, signature fields and JavaScript-driven fields are shown read-only, never guessed. |
-| Size & memory | Installers are 118–130 MiB, mostly the Electron 44 runtime (the Cambuz payload is 17.7 MiB); idle memory measured roughly 150–165 MiB across CI runs on the Windows runner. Accepted trade-offs vs. an end-of-life runtime, still open to optimization. |
+| Size & memory | The artifacts linked above are 118–130 MiB. The current source builds **93–111 MiB** installers (Windows setup 97.3 MiB, AppImage 93.0 MiB, DMG 106.7 MiB) after trimming unused Chromium locales, SwiftShader and app payload (the Cambuz payload is now 5.7 MiB); the rest is the Electron 44 runtime. See [installer size reduction](DEVELOPMENT.md#installer-size-reduction). Idle memory measured roughly 150–165 MiB across CI runs on the Windows runner. |
 | OS floors | Windows 10+ x64, macOS 13+ (arm64), modern x64 Linux. Electron 44 dropped Windows 7/8, 32-bit and macOS 12. |
 | No auto-updates | Re-download a new build manually; there is no update service to run in the background. |
 

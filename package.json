@@ -64,6 +64,11 @@
     },
     "npmRebuild": false,
     "asar": true,
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
+    ],
+    "afterPack": "scripts/after-pack.cjs",
     "fileAssociations": [
       {
         "ext": "pdf",
@@ -97,6 +102,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "license": "LICENSE",
+      "differentialPackage": false,
       "artifactName": "Cambuz-PDF-Reader-${version}-win-${arch}-setup.${ext}"
     },
     "portable": {

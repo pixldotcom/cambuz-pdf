@@ -43,7 +43,18 @@ const FORBIDDEN = [
   (p) => p.includes('/@napi-rs/'),
   (p) => p.includes('pdfjs-dist/legacy/'),
   (p) => p.endsWith('.map'),
+  // Pruned by scripts/stage-app.mjs (allowlist): PDF.js assets the app never
+  // fetches and pdf-lib's module trees (the app loads only its ESM bundle).
+  (p) => /^node_modules\/pdfjs-dist\/(cmaps|image_decoders|web|types)\//.test(p),
+  (p) => /^node_modules\/pdf-lib\/(cjs|es|src|ts3\.4)\//.test(p),
+  (p) => /\.min\.m?js$/.test(p),
+  (p) => p.endsWith('.d.ts') || /(^|\/)README(\.md)?$/i.test(p),
 ];
+
+// Size budget for the app payload (file data inside app.asar). The staged
+// payload is about 5.7 MiB; the budget leaves headroom for features while
+// catching a dependency or staging change that would re-bloat the package.
+const MAX_PAYLOAD_MIB = 8;
 
 function readAsarHeader(file) {
   const fd = fs.openSync(file, 'r');
@@ -102,6 +113,12 @@ function main() {
 
     for (const file of REQUIRED_FILES) report(files.has(file), `required file ${file}`);
     for (const dir of REQUIRED_DIRECTORIES) report(hasDirectory(dir), `required directory ${dir}`);
+
+    report(
+      totalBytes <= MAX_PAYLOAD_MIB * 1048576,
+      `app payload within the ${MAX_PAYLOAD_MIB} MiB budget`,
+      `${(totalBytes / 1048576).toFixed(1)} MiB`,
+    );
 
     const forbidden = [...files.keys()].filter((p) => FORBIDDEN.some((test) => test(p)));
     report(forbidden.length === 0, 'no development-only or unused payloads', forbidden.length ? `found ${forbidden.length}, e.g. ${forbidden.slice(0, 3).join(', ')}` : '');

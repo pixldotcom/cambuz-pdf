@@ -1247,7 +1247,7 @@ function renderRecents() {
     const metaBits = [];
     if (entry.pages) metaBits.push(`${entry.pages} pages`);
     if (entry.size) metaBits.push(formatBytes(entry.size));
-    metaBits.push(timeAgo(entry.openedAt));
+    metaBits.push(timeAgo(entry.openedAt, window.cambuzAPI?.systemLocale));
     if (entry.lastPage > 1) metaBits.push(`page ${entry.lastPage}`);
     const meta = document.createElement('span');
     meta.className = 'recent-meta';

@@ -455,6 +455,14 @@ assert(formatBytes(1536) === '1.5 KB', 'formatBytes: 1536 → 1.5 KB', formatByt
 assert(formatBytes(0) === '', 'formatBytes: 0 → empty');
 assert(timeAgo(Date.now() - 60000).includes('min'), 'timeAgo: minutes');
 assert(timeAgo(Date.now() - 3600000 * 3).includes('hour'), 'timeAgo: hours');
+{
+  // Older entries use the OS regional locale passed by the desktop app.
+  const old = Date.UTC(2024, 0, 31, 12);
+  assert(timeAgo(old, 'en-GB') === new Date(old).toLocaleDateString('en-GB'), 'timeAgo: old dates follow the given locale', timeAgo(old, 'en-GB'));
+  assert(timeAgo(old, 'en-GB') !== timeAgo(old, 'en-US'), 'timeAgo: en-GB and en-US dates differ');
+  assert(timeAgo(old, 'not a locale!') === new Date(old).toLocaleDateString(), 'timeAgo: an invalid locale falls back to the default');
+  assert(timeAgo(old) === new Date(old).toLocaleDateString(), 'timeAgo: no locale uses the default');
+}
 
 // ---------------------------------------------------------------------------
 console.log(`\n==============================`);

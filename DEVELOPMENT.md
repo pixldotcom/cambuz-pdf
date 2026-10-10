@@ -19,6 +19,73 @@ Current distributions are CI build artifacts linked from the
 
 ---
 
+## Installer size reduction
+
+Packaging-only pass on branch `arena/4089e3cf-cambuz-pdf` (commit `fe73e6f`). PDF
+rendering, search, printing, forms, security and OCR code are unchanged; the only
+runtime change is that the OS regional locale is forwarded for Recents dates.
+
+### What changed
+
+| Change | Where | Effect |
+| --- | --- | --- |
+| Chromium locale packs: keep `en-US` only (the UI is English-only) | `package.json` `build.electronLanguages` | Removes ~55 `locales/*.pak` (Windows/Linux) and `*.lproj` (macOS). Chromium-provided strings (e.g. native form validation bubbles) are English. Text rendering, Indian-language shaping, search and ICU data are unaffected (`icudtl.dat` still ships). |
+| Recents dates keep the user's regional format | `main.js` `additionalArguments`, `preload.js` `systemLocale`, `src/recents.js` `timeAgo(ts, locale)` | Without other locale packs the renderer default locale is `en-US`; `app.getSystemLocale()` (validated BCP 47 tag) is forwarded so dates older than 30 days still follow the OS format. |
+| SwiftShader removed on Windows and Linux | `scripts/after-pack.cjs` (`build.afterPack`) | `vk_swiftshader.dll` (5.3 MiB) / `libvk_swiftshader.so` (4.4 MiB) and the ICD JSON. Chromium 152 only uses SwiftShader for WebGL behind `--enable-unsafe-swiftshader`; PDF.js draws on a 2D canvas. Without a GPU Chromium composites in software (Windows always has WARP). macOS is untouched (unsigned, never launched in CI). |
+| App payload allowlist | `scripts/stage-app.mjs` `RUNTIME_PACKAGE_FILES` | `node_modules` keeps only `pdfjs-dist/build/pdf.mjs`, `pdf.worker.mjs`, `standard_fonts/` and `pdf-lib/dist/pdf-lib.esm.js` (self-contained: inlines pako, tslib, `@pdf-lib/*`), plus every package's `package.json` and licence files. PDF.js `cmaps/` are dropped because no `cMapUrl` is configured. Staging fails if an allowlisted file is missing. |
+| Maximum compression; solid NSIS payload | `build.compression: "maximum"`, `nsis.differentialPackage: false` | The setup was differential-aware (1 MB dictionary, non-solid 7z) for delta auto-updates, which Cambuz does not use. AppImage now uses xz squashfs, DMG uses UDBZ. |
+| Regression guard | `scripts/check-packaged-app.mjs` | Fails if the `app.asar` file data exceeds **8 MiB** or if pruned trees (`cmaps/`, pdf-lib `cjs/es/src/ts3.4`, `*.min.js`, `.d.ts`, READMEs) reappear. Verified to fail on the previous payload (19.4 MiB, 1,172 unused files). |
+| Size visibility | `scripts/after-pack.cjs` | Every CI build annotates the unpacked (installed) size and the largest files per platform (`Installed size` notices). |
+
+### Measured sizes (CI)
+
+Before: `main` run 38052144793 (commit `703dc75`). After: run 38066446109
+(commit `fe73e6f`), all four jobs green.
+
+| File | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Windows installer (`-setup.exe`) | 118.8 MiB | **97.3 MiB** | −21.5 MiB (−18%) |
+| Windows portable (`-portable.exe`) | 118.4 MiB | **96.9 MiB** | −21.5 MiB (−18%) |
+| Linux AppImage | 125.5 MiB | **93.0 MiB** | −32.5 MiB (−26%) |
+| macOS DMG | 132.7 MiB | **106.7 MiB** | −26.0 MiB (−20%) |
+| macOS ZIP | 127.2 MiB | **111.4 MiB** | −15.8 MiB (−12%) |
+| `app.asar` (Cambuz payload) | 17.9 MiB | **5.7 MiB** | −12.2 MiB (−68%) |
+| Installed app, Windows (unpacked) | not recorded | **320.2 MiB** (17 files) | — |
+| Installed app, Linux (unpacked) | not recorded | **275.2 MiB** (16 files) | — |
+
+Largest remaining Windows files: `Cambuz PDF Reader.exe` 234.9 MiB (Electron/Chromium),
+`dxcompiler.dll` 24.6 MiB, `LICENSES.chromium.html` 19.5 MiB (licence notices; must
+ship), `resources.pak` 11.9 MiB, `icudtl.dat` 10.4 MiB, `app.asar` 5.7 MiB.
+
+### Validation
+
+- `npm test`: all suites pass (Phase 2 132, DOM 62, Phase 3 58, Phase 4 133,
+  Phase 5 278, Phase 6 229, Phase 7 54 + 2 Tesseract skips, samples 19, context
+  menu 12, text selection 4, main process 118, Phase 8 focused); new assertions
+  cover the forwarded locale and `timeAgo` locale handling.
+- CI packaged smoke tests: Windows unpacked, silently installed and portable
+  35/35 each; Linux unpacked under Xvfb 32/32. macOS built only (not launched).
+- The pruned payload was loaded in isolation in Node (outside the repository, so
+  no fallback to the full `node_modules`): pdf-lib form read, font embed and save;
+  PDF.js open and English/Hindi text extraction through the staged worker.
+
+### Not done / follow-ups
+
+- **`dxcompiler.dll` + `dxil.dll` (Windows, ~26 MiB installed).** The DirectX
+  shader compiler used by Chromium's WebGPU/D3D12 path. Cambuz does not use
+  WebGPU, but Chromium's GPU stack can use D3D12 elsewhere and the CI runner
+  has no real GPU, so removal would need testing on real GPUs. Not removed.
+- **AppImage launch time with xz** was not measured (the CI smoke test launches
+  the unpacked build).
+- **The runtime floor.** The Electron executable alone is ~235 MiB unpacked
+  (~75–80 MiB compressed), so an Electron build cannot reach the size of native
+  readers such as SumatraPDF. A system-WebView runtime (e.g. Tauri with WebView2
+  on Windows) could reuse the HTML/JS/PDF.js front end and is the path to a
+  single-digit/low-double-digit MiB installer; it would require porting the
+  main-process code (`main.js`, IPC, printing, file association, OCR bridge).
+
+---
+
 ## Final branding pass — official icon, About dialog, README landing page
 
 Applied after the 1.1.0 release candidate (`ac2b848`). Branding, the About dialog and

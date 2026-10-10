@@ -16,6 +16,17 @@ let mainWindow;
 let pendingOsFile = null;
 let rendererIsReady = false;
 
+// Only the en-US Chromium locale pack ships (`electronLanguages` in package.json,
+// which keeps the installer small), so the renderer's default locale is en-US.
+// The OS regional locale is passed to the preload so dates in Recents still use
+// the user's format. Only a well-formed BCP 47 tag is forwarded.
+function systemLocaleArguments() {
+  const locale = typeof app.getSystemLocale === 'function' ? app.getSystemLocale() : '';
+  return typeof locale === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8}){0,4}$/.test(locale)
+    ? [`--cambuz-system-locale=${locale}`]
+    : [];
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -30,6 +41,7 @@ function createWindow() {
       nodeIntegration: false,
       // Explicit (also Electron's default): the page runs in the Chromium sandbox.
       sandbox: true,
+      additionalArguments: systemLocaleArguments(),
     },
     backgroundColor: '#1e1e2e',
     show: false,
