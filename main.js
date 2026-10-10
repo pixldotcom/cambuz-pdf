@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { getOcrStatus, recognizePng } = require('./src/ocr-engine.cjs');
+const { bundledSamplePath } = require('./src/bundled-samples.cjs');
+const { buildPageContextMenu } = require('./src/context-menu.cjs');
 
 let mainWindow;
 
@@ -46,6 +48,14 @@ function createWindow() {
       detail: 'Your edits are only in memory. The original file on disk has not been changed.',
     });
     if (choice === 0) event.preventDefault();
+  });
+
+  // Right-click on the page: Copy and Select All Text on Page (src/context-menu.cjs).
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const template = buildPageContextMenu(params, {
+      onSelectAll: () => mainWindow.webContents.send('menu-select-all'),
+    });
+    Menu.buildFromTemplate(template).popup({ window: mainWindow });
   });
 
   // Build menu
@@ -243,6 +253,25 @@ ipcMain.handle('read-file', async (_event, filePath) => {
     return {
       ok: true,
       name: path.basename(filePath),
+      size: buffer.length,
+      data: new Uint8Array(buffer),
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Bundled sample PDFs for the welcome-screen buttons. The renderer is loaded from
+// file://, where it cannot fetch the app's own files by URL, so the bytes are read
+// here instead. Only names on the bundled-sample list are readable.
+ipcMain.handle('read-sample', async (_event, name) => {
+  try {
+    const filePath = bundledSamplePath(__dirname, name);
+    if (!filePath) return { ok: false, error: 'Unknown sample document' };
+    const buffer = await fs.promises.readFile(filePath);
+    return {
+      ok: true,
+      name,
       size: buffer.length,
       data: new Uint8Array(buffer),
     };

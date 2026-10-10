@@ -1,26 +1,32 @@
 {
   "name": "cambuz-pdf",
+  "productName": "Cambuz PDF Reader",
   "version": "1.1.0",
   "description": "Cambuz PDF Reader — A lightweight, fast PDF reader",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "serve": "node server.js",
-    "build": "echo 'Build requires Electron on target machine'",
+    "build": "npm run build:win",
+    "build:win": "node scripts/stage-app.mjs && electron-builder --win --x64 --publish never",
+    "build:linux": "node scripts/stage-app.mjs && electron-builder --linux --x64 --publish never",
+    "build:mac": "node scripts/stage-app.mjs && electron-builder --mac --arm64 --publish never",
+    "build:dir": "node scripts/stage-app.mjs && electron-builder --win --x64 --dir --publish never",
     "samples": "node scripts/create-samples.js && python3 scripts/create-unicode-samples.py",
     "samples:js": "node scripts/create-samples.js",
     "samples:unicode": "python3 scripts/create-unicode-samples.py",
     "samples:secure": "node scripts/create-secure-samples.js && python3 scripts/create-secure-samples.py",
     "samples:phase6": "python3 scripts/create-phase6-samples.py",
     "samples:phase7": "node scripts/create-phase7-samples.mjs",
-    "test": "node scripts/test-phase2.mjs && node scripts/test-phase2-dom.mjs && node scripts/test-phase3.mjs && node scripts/test-phase4.mjs && node scripts/test-phase5.mjs && node scripts/test-phase6.mjs && node scripts/test-phase7.mjs",
+    "test": "node scripts/test-phase2.mjs && node scripts/test-phase2-dom.mjs && node scripts/test-phase3.mjs && node scripts/test-phase4.mjs && node scripts/test-phase5.mjs && node scripts/test-phase6.mjs && node scripts/test-phase7.mjs && node scripts/test-samples.mjs && node scripts/test-context-menu.mjs && node scripts/test-text-selection.mjs && node scripts/test-main-process.mjs",
     "test:node": "node scripts/test-phase2.mjs",
     "test:dom": "node scripts/test-phase2-dom.mjs",
     "test:phase3": "node scripts/test-phase3.mjs",
     "test:phase4": "node scripts/test-phase4.mjs",
     "test:phase5": "node scripts/test-phase5.mjs",
     "test:phase6": "node scripts/test-phase6.mjs",
-    "test:phase7": "node scripts/test-phase7.mjs"
+    "test:phase7": "node scripts/test-phase7.mjs",
+    "test:packaged": "node scripts/smoke-test-packaged.mjs"
   },
   "author": "Cambuz",
   "license": "MIT",
@@ -43,6 +49,73 @@
     "@napi-rs/canvas": "^1.0.10",
     "@pdf-lib/fontkit": "^1.1.1",
     "electron": "^28.0.0",
+    "electron-builder": "^26.17.0",
     "jsdom": "^30.1.2"
+  },
+  "build": {
+    "appId": "com.cambuz.pdfreader",
+    "productName": "Cambuz PDF Reader",
+    "copyright": "Copyright © Cambuz",
+    "directories": {
+      "app": ".build-app",
+      "output": "dist"
+    },
+    "npmRebuild": false,
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Cambuz-PDF-Reader-${version}-win-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Cambuz-PDF-Reader-${version}-win-${arch}-portable.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "executableName": "cambuz-pdf-reader",
+      "category": "Office",
+      "artifactName": "Cambuz-PDF-Reader-${version}-linux-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "Cambuz-PDF-Reader-${version}-mac-${arch}.${ext}"
+    }
   }
 }

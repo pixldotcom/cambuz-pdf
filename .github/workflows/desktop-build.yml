@@ -1,0 +1,202 @@
+name: Desktop builds
+
+# Packages the Electron desktop app. Windows x64 is the Phase 9 target and is a
+# gating job; Linux and macOS are experimental feasibility builds that report
+# their own result. Artifacts are uploaded before runtime smoke tests so the
+# build output is kept even when a runtime check fails.
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Builds are unsigned: never search the runner for a code-signing identity.
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  test:
+    name: Regression tests (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # Tests run without the Electron binary; packaging jobs download it.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  windows-x64:
+    name: Windows x64 (installer + portable)
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies (downloads the Windows Electron runtime)
+        run: npm ci
+      - name: Build NSIS installer and portable executable
+        run: npm run build:win
+      - name: Verify packaged contents
+        run: node scripts/check-packaged-app.mjs dist/win-unpacked/resources/app.asar
+      - name: Write SHA-256 checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -like '*-setup.exe' -or $_.Name -like '*-portable.exe' }
+          $sums = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLower()
+            $mib = [math]::Round($file.Length / 1MB, 1)
+            Write-Host "::notice title=Build output::$($file.Name) - $mib MiB - SHA-256 $hash"
+            "$hash  $($file.Name)"
+          }
+          $sums | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          Get-Content dist/SHA256SUMS.txt
+          $malformed = Get-Content dist/SHA256SUMS.txt | Where-Object { $_ -notmatch '^[0-9a-f]{64}  \S' }
+          if ($malformed) { throw "Malformed SHA256SUMS.txt lines: $($malformed -join '; ')" }
+          $appAsar = Get-Item dist/win-unpacked/resources/app.asar
+          Write-Host "::notice title=Build output::app.asar (renderer payload) - $([math]::Round($appAsar.Length / 1MB, 1)) MiB"
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: cambuz-pdf-windows-x64
+          path: |
+            dist/*-setup.exe
+            dist/*-portable.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Smoke test the unpacked build
+        run: node scripts/smoke-test-packaged.mjs --app "dist/win-unpacked/Cambuz PDF Reader.exe" --out smoke/win-unpacked --port 9331 --timeout 180
+      - name: Install silently, smoke test the installed app, uninstall
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist -Filter '*-setup.exe' -File | Select-Object -First 1
+          $target = Join-Path $env:RUNNER_TEMP 'cambuz-pdf-install'
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$target") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with code $($install.ExitCode)" }
+          $exe = Join-Path $target 'Cambuz PDF Reader.exe'
+          if (-not (Test-Path $exe)) { throw "Installed executable not found: $exe" }
+          node scripts/smoke-test-packaged.mjs --app $exe --out smoke/installed --port 9332 --timeout 180
+          $smokeExit = $LASTEXITCODE
+          $uninstaller = Join-Path $target 'Uninstall Cambuz PDF Reader.exe'
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/S') -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with code $($uninstall.ExitCode)" }
+          for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw 'Installed application still present after uninstall' }
+          if ($smokeExit -ne 0) { throw "Smoke test failed for the installed application (exit $smokeExit)" }
+      - name: Smoke test the portable executable
+        shell: pwsh
+        run: |
+          $portable = Get-ChildItem dist -Filter '*-portable.exe' -File | Select-Object -First 1
+          node scripts/smoke-test-packaged.mjs --app $portable.FullName --out smoke/portable --port 9333 --timeout 180
+      - name: Upload smoke-test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-test-evidence-windows-x64
+          path: smoke/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  linux-x64:
+    name: Linux x64 (AppImage) — experimental
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build AppImage
+        run: npm run build:linux
+      - name: Verify packaged contents
+        run: node scripts/check-packaged-app.mjs dist/linux-unpacked/resources/app.asar
+      - name: Write SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum *.AppImage > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          for f in *.AppImage; do
+            echo "::notice title=Build output::$f — $(awk -v b=$(stat -c %s "$f") 'BEGIN{printf "%.1f MiB", b/1048576}') — $(sha256sum "$f" | cut -d' ' -f1)"
+          done
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: cambuz-pdf-linux-x64
+          path: |
+            dist/*.AppImage
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Install virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Smoke test the unpacked build under Xvfb
+        run: xvfb-run -a node scripts/smoke-test-packaged.mjs --app dist/linux-unpacked/cambuz-pdf-reader --arg --no-sandbox --out smoke/linux --port 9335 --timeout 180
+      - name: Upload smoke-test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-test-evidence-linux-x64
+          path: smoke/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  macos-arm64:
+    name: macOS arm64 (DMG + ZIP, unsigned) — experimental
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build DMG and ZIP
+        run: npm run build:mac
+      - name: Verify packaged contents
+        run: node scripts/check-packaged-app.mjs "dist/mac-arm64/Cambuz PDF Reader.app/Contents/Resources/app.asar"
+      - name: Write SHA-256 checksums
+        run: |
+          cd dist
+          shasum -a 256 *.dmg *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          for f in *.dmg *.zip; do
+            echo "::notice title=Build output::$f — $(awk -v b=$(stat -f %z "$f") 'BEGIN{printf "%.1f MiB", b/1048576}') — $(shasum -a 256 "$f" | cut -d' ' -f1)"
+          done
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: cambuz-pdf-macos-arm64
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
