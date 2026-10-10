@@ -57,7 +57,7 @@
   "build": {
     "appId": "com.cambuz.pdfreader",
     "productName": "Cambuz PDF Reader",
-    "copyright": "Copyright © Cambuz",
+    "copyright": "Copyright © 2026 Cambuz",
     "directories": {
       "app": ".build-app",
       "output": "dist"

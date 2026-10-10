@@ -19,6 +19,63 @@ Current distributions are CI build artifacts linked from the
 
 ---
 
+## Final branding pass — official icon, About dialog, README landing page
+
+Applied after the 1.1.0 release candidate (`ac2b848`). Branding, the About dialog and
+the README only: no PDF rendering or other application behavior was changed.
+
+### Icon assets (official identity)
+
+- **Master asset.** `assets/icon-master.png` (1254×1254 RGB PNG, fully opaque — the
+  artwork is a full-bleed tile with its own dark background, so there is no alpha to
+  preserve) is the official Cambuz icon and the single source of truth. It is kept
+  byte-for-byte as supplied; it is never redrawn, recoloured or substituted.
+- **Derivation.** `scripts/generate-icon-assets.py` (Python 3 + Pillow) only rescales
+  the master, with no cropping or shape changes:
+  - `assets/icon.png` — 512×512, runtime window/taskbar icon, README logo, About dialog.
+  - `build/icon.png` — 512×512, electron-builder Linux icon (AppImage hicolor set).
+  - `build/icon.ico` — 16/24/32/48/64/128/256 px, Windows installer, portable
+    executable, Explorer/shortcut/taskbar icons.
+  - `build/icon.icns` — 32–1024 px (`ic07`–`ic14`), macOS bundle, Dock and Finder.
+- **Fail-clearly guarantees.** The generator exits with an explicit error when the
+  master is missing or unusable (non-PNG, non-square, below 1024 px); packaging via
+  `scripts/stage-app.mjs` fails when any referenced icon file is absent, and
+  electron-builder itself errors on a missing icon — there is no silent fallback to a
+  generic icon. The interim Phase 9 generator `scripts/create-icon.py` (which drew an
+  invented mark) was removed so it can never overwrite the official artwork.
+
+### About dialog (Application → Help → About Cambuz PDF Reader)
+
+- Implemented as `src/about.html`, opened by `showAboutWindow()` in `main.js`. It
+  displays the official icon, the product name **Cambuz PDF Reader**, the description
+  “PDF reading without the bloat.”, the creator **Rajesh Singh**, a clickable official
+  website **<https://pixldot.com/>**, the version of the running application (passed
+  from `app.getVersion()` — never hard-coded) and `Copyright © 2026 Cambuz` (year and
+  rights holder taken from `LICENSE`).
+- The website opens in the user's default browser through the same window-open policy
+  as the main window (http(s) → `shell.openExternal`, everything denied); it is never
+  rendered inside the app. Security posture is unchanged: `sandbox: true`, context
+  isolation on, Node integration off, no preload bridge, `will-navigate` denied.
+  Asserted by `scripts/test-main-process.mjs`.
+- The macOS application menu keeps its native About panel (`role: 'about'`); the
+  Quit/Hide/Services and Edit copy/cut/paste fixes in `src/mac-menu.cjs` are untouched.
+
+### Verification status — automated checks vs native desktop tests
+
+Verified automatically in this pass: derived icon formats and entry sizes
+(`.ico`/`.icns` containers, PNG dimensions), recognisability of the 16/24 px
+silhouettes, the full regression suite including the new About dialog assertions, and
+CI packaging checks (AppImage icon + desktop-entry wiring, macOS `icon.icns` presence,
+Windows product/publisher/version metadata asserts).
+
+**Not visually verified on native desktops:** how the icon appears in the Windows
+taskbar/Start Menu/Explorer, the macOS Dock/Finder and Linux desktop environments; the
+About dialog's rendered appearance on each OS; and the NSIS wizard's icon pages. These
+remain manual acceptance items (see
+[`docs/WINDOWS-ACCEPTANCE-CHECKLIST.md`](docs/WINDOWS-ACCEPTANCE-CHECKLIST.md)). A
+successful build is not treated as visual verification.
+
+---
 
 ## Phase 10 — Release quality and final readiness
 
@@ -255,7 +312,7 @@ footprint is not in scope for Phase 10 and is recorded as a follow-up.
 | Item | Value | Where checked |
 | --- | --- | --- |
 | Product name | `Cambuz PDF Reader` | `package.json`, `src/index.html`, CI ProductName assert |
-| Version | `1.1.0` | `package.json`, artifact names, CI FileVersion assert. The About dialog in `main.js` **hard-codes** `v1.1.0`; it must be updated with the version. |
+| Version | `1.1.0` | `package.json`, artifact names, CI FileVersion assert. The About dialog reads `app.getVersion()` at runtime (asserted in `test-main-process.mjs`); no version string is hard-coded there. |
 | App ID | `com.cambuz.pdfreader` | `package.json` `build.appId`. **Unchanged; unconfirmed.** Changing it after release would create a new app identity. |
 | Publisher (`CompanyName`) | `Cambuz` (from `author`) | CI asserts it is non-empty. **Unchanged; unconfirmed.** |
 | Copyright | `Copyright (c) 2026 Cambuz` | `LICENSE`, `package.json` |
@@ -415,9 +472,12 @@ instead of assumed open:
   request/check handlers deny everything except the Fullscreen API the reader
   uses. The existing `window.cambuzAPI` surface is unchanged apart from the two
   additive file-open members (`rendererReady`, `onOpenFilePath`).
-- **Icon set.** New Cambuz mark (indigo tile, document sheet, coral bookmark;
-  generator: `scripts/create-icon.py`): `assets/icon.png` (512, staged for the
-  window icon), `build/icon.ico` (multi-size Windows), `build/icon.icns`
+- **Icon set.** (Superseded by the final branding pass — see the top of this
+  document.) Phase 9 drew an interim mark with `scripts/create-icon.py`; the
+  shipped icon files are now derived from the official master
+  `assets/icon-master.png` via `scripts/generate-icon-assets.py`:
+  `assets/icon.png` (512, staged for the window icon), `build/icon.ico`
+  (multi-size Windows), `build/icon.icns`
   (macOS), `build/icon.png` (512, Linux). Wired in `package.json`
   (`win`/`mac`/`linux` icon); staging fails fast if any icon is missing, and
   electron-builder itself errors on a missing icon file, so there is no silent
@@ -520,7 +580,7 @@ installer pages, and desktop (non-runner) behavior remain manual (see below).
 ### Building and testing locally
 
 Prerequisites: Node 22, npm, Python 3 + Pillow (only to regenerate icons via
-`scripts/create-icon.py`), and network access to the npm registry and GitHub
+`scripts/generate-icon-assets.py`), and network access to the npm registry and GitHub
 (Electron/electron-builder binaries download from GitHub releases).
 
 ```bash
