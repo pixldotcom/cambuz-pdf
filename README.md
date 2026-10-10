@@ -2,7 +2,7 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 8 — performance audit, bounded rendering/cache work, regression tests, and repeatable benchmark probes implemented. Native Electron packaging/performance and scanned-page raster timings remain unavailable in this sandbox; see the Phase 8 limitations below.<br>
+**Project status:** Phase 8 — performance audit, bounded rendering/cache work, regression tests, Node benchmarks, and Windows packaged-Electron validation complete. The separate Node/PDF.js scanned-page raster probe still crashes; native printer output and long-session memory profiling remain outside the CI checks. See the Phase 8 limitations below.<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
@@ -12,7 +12,7 @@
 
 ## Phase 8 — Performance audit, measurement and optimization
 
-**Audit status: PARTIALLY VERIFIED.** The renderer/search/canvas changes and the automated regressions below pass. Native Electron startup, packaged-app smoke tests, and production Chromium memory/timing could not be measured here because the Electron runtime download is blocked; the scanned-PDF raster probe also remains unavailable after a native canvas crash. No application feature or visual redesign was removed, and no dependency version was changed for performance.
+**Audit status: COMPLETE WITH DOCUMENTED LIMITATIONS.** The renderer/search/canvas changes and automated regressions pass, and the unpacked, installed, and portable Windows Electron apps passed packaged-runtime checks in GitHub Actions. That runner also collected one set of startup, render, search, and process-tree memory observations per packaging mode. These are CI-runner observations, not universal performance guarantees. The separate Linux Node/PDF.js scanned-page raster probe still segfaults; native printer output and a long-session memory/leak profile remain unverified. No application feature or visual redesign was removed, and no dependency version was changed for performance.
 
 ### What changed
 
@@ -43,7 +43,7 @@ The baseline is the previously recorded three-worker median before the Phase 8 c
 | Punjabi (4 / 0.01) | 63.90 → 65.41 | 46.46 → 45.77 | 17.43 → 17.57 | 29.65 → 30.65 | 5.47 → 0.33 | 192.00 → 194.04 | n/a |
 | mixed-language (16 / 1.27) | 65.90 → 65.33 | 90.44 → 96.85 | 301.03 → 358.25 | 130.12 → 144.09 | 76.75 → 0.73 | 211.12 → 213.02 | n/a |
 
-The repeat-query improvement is the clear measured result: the current run makes **zero page-text extraction calls on the second query** (the baseline re-extracted text; on both 100-page cases it made 100 calls on each query). Repeat-query medians fell from 45.80 to 0.74 ms for the 100-page probe and 810.48 to 1.18 ms for the text-heavy probe. First-query, open, thumbnail, and print numbers move in both directions; these small fresh-process samples do not establish a causal regression or improvement for those unchanged subsystems. In particular, the observed large-text open/first-render and 10-page print deltas are retained above rather than described as wins. Native-app profiling is still needed before making claims about user-perceived startup or production memory.
+The repeat-query improvement is the clear measured result: the current run makes **zero page-text extraction calls on the second query** (the baseline re-extracted text; on both 100-page cases it made 100 calls on each query). Repeat-query medians fell from 45.80 to 0.74 ms for the 100-page probe and 810.48 to 1.18 ms for the text-heavy probe. First-query, open, thumbnail, and print numbers move in both directions; these small fresh-process samples do not establish a causal regression or improvement for those unchanged subsystems. In particular, the observed large-text open/first-render and 10-page print deltas are retained above rather than described as wins. The Windows packaged-app measurements below are from a different runtime and method; they should not be conflated with these PDF.js/Node medians.
 
 ### Current process memory and operation CPU snapshots
 
@@ -71,15 +71,47 @@ All values below are current three-worker medians. RSS is MiB. CPU is process CP
 | Punjabi | 65.48 | 28.78 | 30.67 / 0.34 | n/a | 1.61 |
 | mixed-language | 72.55 | 503.22 | 215.38 / 0.74 | n/a | 2.48 |
 
+### Native packaged Electron validation (Windows x64)
+
+The native run is GitHub Actions [`Desktop builds`, run 38019417062](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38019417062), on commit `cb68803ef3d8e21124ae7c588f1671766d43a857` (2026-10-10). All four jobs succeeded: Linux regression tests, the Windows packaged runtime checks, the experimental Linux AppImage build/smoke test, and the experimental unsigned macOS build. This is a separate runtime and benchmark from the PDF.js/Node table above.
+
+**Runner and method.** Windows x64 GitHub runner image `win25-vs2026`; Node `v22.23.3`; 4 logical CPUs reported as AMD EPYC 9V45; 16,379 MiB RAM. The workflow launched the actual Electron executables for the unpacked build, a silently installed NSIS build (then uninstalled it), and the portable executable. Each mode passed **32/32 checks**. The smoke harness drives the actual packaged renderer over Chromium DevTools Protocol and dispatches a file-drop event there, plus pointer, keyboard, and Windows-clipboard operations; it is not a browser-only test. Per-mode timings below are three single observations (one per packaging mode), not medians or timing thresholds. Their concise CI annotation does not retain a reliable target-to-value mapping, so values are reported as observed sets/ranges rather than attributed to a specific packaging mode.
+
+**Functional results, per mode:** packaged PDF open/render; page-number jump to page 5 and next/previous navigation; zoom out/in and back within the canvas pixel budget; print-preview preparation and first-sheet rendering; mouse text selection and Ctrl+C to the Windows clipboard; Hindi and Punjabi Unicode selection/copy; refusal to select text in a copy-protected PDF; 100-page search and case-insensitive repeat search; and scanned-page rendering all passed. Each run also completed **3/3** open/first-render/close cycles with the viewer canvas released and reported zero uncaught renderer exceptions. The four-page scanned fixture rendered at `958×1354` with zero selectable characters. CI prepared a print-ready PDF and rendered the first of 10 sheets; it did **not** submit a job to a physical or virtual printer.
+
+**Packaged-app observations:**
+
+| Measurement | Observed values across the three Windows package runs | Measurement boundary |
+| --- | --- | --- |
+| Process launch to renderer-ready | 559.5 ms; 1,664.1 ms; 9,078.5 ms | Includes DevTools target polling/attachment; this spread is too wide to claim a reliable startup score. |
+| 10-page sample drop to first rendered page | 256.9 ms; 257.4 ms; 258.9 ms | From the harness's drop-event dispatch inside the packaged renderer until page 1 canvas/status are ready. |
+| 100-page search, first / same-marker cached repeat | 51.90 / 0.90 ms; 52.60 / 1.10 ms; 53.90 / 1.20 ms | Renderer `performance.now()`; includes PDF.js text indexing/highlighting. Both queries found the marker on all 100 pages. |
+| Print-preview preparation | 301.1 ms; 317.3 ms; 358.8 ms | Prepare the 10-sheet print PDF and render its first `256×363` preview sheet; no OS print submission. |
+| Three open/render/close cycles | 800.7 ms; 806.6 ms; 817.6 ms total | Per smoke invocation, for all three cycles together. |
+
+Windows process memory is the **sum of the launched app process and its descendants**, not the Node worker's RSS. The smoke test records point-in-time working-set/private-byte snapshots (5–6 processes); these are not peak-memory or idle-CPU measurements.
+
+| Snapshot | Working set (MiB) | Private bytes (MiB) |
+| --- | ---: | ---: |
+| Settled welcome-screen idle | 268.8–301.4 | 105.1–110.8 |
+| After the 10-page sample first render | 332.4–356.1 | 143.4–148.3 |
+| After print preview was closed | 384.4–407.3 | 155.2–165.8 |
+| After the first and repeat 100-page searches | 350.5–380.3 | 155.3–157.2 |
+| After three document cycles, viewer closed | 355.8–379.6 | 155.8–157.8 |
+
+These are single snapshots on one virtualized Windows runner, not a long-session leak study; the post-cycle footprint remains above the welcome-screen reading, which alone does not establish a leak. Startup was measured once per packaging mode and includes harness attachment overhead; no stable cold-start/visible-window latency is claimed. The build remains Electron 28.3.3 (Chromium 120); updating the end-of-life runtime was outside Phase 8.
+
+**CI artifacts:** [Windows installer and portable executables (`cambuz-pdf-windows-x64`)](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38019417062/artifacts/11657780653) and [Windows smoke-test evidence (`smoke-test-evidence-windows-x64`)](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38019417062/artifacts/11657463439). The evidence artifact contains the smoke reports, logs and screenshots. Artifacts follow the repository's GitHub Actions retention policy.
+
 ### Regression coverage and limits
 
 - `npm test` runs the full Phase 2–8 and sample/context-menu/text-selection/main-process suite. The new `test:phase8` checks extreme canvas dimensions, pixel/entry LRU accounting, stale-search invalidation, lazy thumbnail rendering, the scroll fallback, cancellation/cleanup in both thumbnail views, overlapping document loads (a delayed stale fetch cannot replace a newer committed PDF), and a real ten-page PDF through rapid navigation, repeated zoom, bounded viewer output, and close cleanup.
 - The existing suite continues to cover Unicode extraction/search and selection/copy for Hindi, Punjabi, mixed scripts and other Indian languages; print-PDF preparation; forms; password protection and permissions; page operations; OCR UI/input bounds; sample buttons; and context menus. OCR quality checks are skipped when Tesseract/language packs are absent.
-- **Not measured:** Electron/window startup to first visible page, native Chromium RSS/idle CPU, native packaged rendering, actual OS printing/spooling, and a reliable app-level long-session leak curve. The Node worker’s post-destroy RSS is only a proxy and does not prove memory returned to the OS.
-- The scanned fixture was opened/searched, but its raster timings are unavailable: the earlier Linux `@napi-rs/canvas` scanned-page raster worker segfaulted (exit 139), so the harness intentionally skips that render path. Do not interpret `n/a` as a zero-time render.
-- `node scripts/stage-app.mjs` succeeds and stages the current runtime tree at **21.4 MiB uncompressed**. This is not an ASAR or installer size. The last available CI figure is a **19.1 MiB app.asar baseline**; a comparable Phase 8 archive size is unavailable because the Electron binary is missing and its download failed TLS certificate verification. Native `electron-builder` builds and packaged-app smoke tests therefore remain unrun here. No dependency upgrade was made.
+- **Still unmeasured:** idle CPU, peak native memory, reliable window-paint/cold-start latency (the launch observations include DevTools attachment and vary widely), actual OS printer enumeration/submission/output, and a long-session app-level leak curve. The packaged memory snapshots are process-tree working-set/private-byte samples on one virtualized Windows runner, not RSS or proof that memory is returned to the OS.
+- **Separate Node/PDF.js raster failure remains unresolved.** The Linux benchmark parses the four-page scanned fixture and obtains its operator lists, which contain a `2481×3508` image XObject per page. A direct `@napi-rs/canvas` `loadImage()` and scaled `drawImage()` of the image succeed in an isolated Node child process, but the PDF.js `page.render()` path segfaults (exit 139). The fault in that PDF.js/Node-canvas render path has not been identified or fixed; the benchmark deliberately records raster timings as `n/a`. This does not contradict the successful scanned-PDF rendering in packaged Windows Electron—the two execution paths differ. Do not interpret `n/a` as a zero-time render or claim the Node failure is resolved.
+- `node scripts/stage-app.mjs` stages the runtime tree at **21.4 MiB uncompressed**; that is not an ASAR or installer size. The latest successful CI build measured the Windows `app.asar` at **19.1 MiB** and built all three desktop targets. The local sandbox still lacks the Electron runtime, so native builds and runtime checks were performed on CI. No dependency upgrade was made for Phase 8.
 
-Re-run the benchmark with `PHASE8_BENCH_TRIALS=3 npm run benchmark:phase8`; run the focused checks with `npm run test:phase8`; the benchmark has no timing pass/fail thresholds.
+Re-run the Node benchmark with `PHASE8_BENCH_TRIALS=3 npm run benchmark:phase8`; run the focused regression checks with `npm run test:phase8`; the benchmark has no timing pass/fail thresholds. Packaged Electron validation is documented above and is run by the `Desktop builds` workflow.
 
 ## Desktop packaging — Windows x64 build (Phase 9 groundwork)
 
@@ -89,7 +121,8 @@ Packaging was audited before Phase 8. The work added electron-builder configurat
 a staging script, a package contents checker, a runtime smoke test and a CI
 workflow. A follow-up fix changed runtime code for the sample buttons and for
 text selection (see *Sample buttons and text selection* below). Phase 8 preserves
-that packaging setup; its benchmark/staging limitations are recorded below.
+that packaging setup; Windows native-runtime measurements and their limits are
+recorded in the Phase 8 section above.
 
 | Target | Command | Output in `dist/` | Verified in CI (`Desktop builds`) |
 | --- | --- | --- | --- |
@@ -180,11 +213,12 @@ files other than Markdown:
 - `macos-arm64` (experimental): DMG and ZIP build; verify contents; checksums;
   upload. No runtime test yet.
 
-Each smoke run publishes one summary annotation that lists every check, and a
-separate annotation for each failing check. The run's step summary holds the same
-table, so results can be read without downloading the evidence.
-Builds are unsigned: `CSC_IDENTITY_AUTO_DISCOVERY=false` stops electron-builder
-from searching for a signing identity.
+Each smoke run publishes a summary annotation listing every check; Windows runs
+also publish a separate, concise native-measurement annotation. Failing checks
+receive error annotations. The run's step summary holds the results table, so
+checks can be reviewed without downloading evidence. Builds are unsigned:
+`CSC_IDENTITY_AUTO_DISCOVERY=false` stops electron-builder from searching for a
+signing identity.
 
 #### Sample buttons and text selection (follow-up to the first Windows test)
 
@@ -271,16 +305,16 @@ standard editing commands.
 
 #### Measured sizes
 
-From the green `Desktop builds` run for commit `bf2b525` (the `Build output`
-annotations of each job):
+From the latest successful `Desktop builds` run, `38019417062`, on commit
+`cb68803` (the `Build output` annotations of each job):
 
 | File | Size | SHA-256 |
 | --- | --- | --- |
-| `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` | 81.6 MiB | `ae6c4a3aeb41110a3a5f5301c4e03a05b259fcc75e7986f5541b49c635dd01e3` |
-| `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | 81.4 MiB | `f83c26a4d77a0370fa7d8ff55518427bc66bec90fa67a5ad8bf27da08c66d385` |
-| `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | 105.5 MiB | `0eaffacbe14dbefdf277e38963ae50a6829c247f9b66380c79dfae9608050f77` |
-| `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | 96.6 MiB | `07b79c8bc0c1edcd8e36af3a6c0c86609d0eba9b059733a9be43d364cb2b102b` |
-| `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | 93.3 MiB | `4dd8a8f302345877de552e1ffbaf36e5d814a15055ac318a12fc367b8f990bc0` |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` | 81.6 MiB | `0e46e2bf2760203321b16c5eb931920edbe2b92c2252314cede015029ce4e16c` |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | 81.4 MiB | `881540647796c3bdaa24cbc1fcc25b4c5b2c6365b3ba49a2cc671cc797c18bf0` |
+| `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | 105.5 MiB | `63e520a388162e805a8980200c6ac927a62c28a05b329c452feca422ed332a9d` |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | 96.7 MiB | `39ea0a0a4d2998c767e7a0066272c53000487378036e249fd03d0e7d488ae0e2` |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | 93.3 MiB | `4a7d4dcec303629090200a9ab655dae25d131a98f3a4450c91e8caba7b65f2d8` |
 | `app.asar` inside the Windows build (renderer payload) | 19.1 MiB | - |
 
 Digests identify one build, not one commit. The AppImage digest changed between
@@ -962,10 +996,11 @@ compatibility matrix and `npm run test:phase6` results above.
 
 ### Known Limitations
 
-- **Native printer verification**: Electron's native route is implemented, but
-  this sandbox has no Electron binary, desktop display or physical printer.
-  Exercise the printer list, native dialog, copies, paper sizes and actual
-  Windows output on a machine with a configured printer before release.
+- **Native printer verification**: Windows CI validated packaged print-PDF
+  preparation and preview, but did not enumerate printers, open the native
+  printer dialog, or submit a print job. Exercise the printer list, dialog,
+  copies, paper sizes and actual Windows output on a machine with a configured
+  printer before release. The local sandbox still has no Electron runtime.
 - **Device printable margins**: the selected margin value defines the printable
   content box; per-printer non-printable margins are not queried automatically.
   Printers may clip at their hardware edges when `None` is selected.
@@ -1035,8 +1070,9 @@ Server checks cover `/src/index.html`, `/src/print.css`, `/src/print-ui.js`,
 `/src/pdf-ocr.css`, `/src/pdf-ocr-ui.js`, `/src/printing.js`, PDF.js ESM and
 `samples/phase7-scanned.pdf`.
 
-Native Electron/Windows printer behavior and browser canvas-preview appearance
-still require the manual checklist below; they are not asserted as hardware-tested.
+Native Windows printer enumeration/driver output and browser canvas-preview
+appearance remain outside the automated checks; the packaged Windows print-preview
+path passed CI, but it is not a hardware-tested print result.
 
 ### Manual Browser / Windows Checklist
 
