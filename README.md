@@ -2,7 +2,7 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 9 — Packaging and Distribution **IN PROGRESS** (see below). Phase 8 performance work is complete and preserved.<br>
+**Project status:** Phase 9 — Packaging and Distribution **COMPLETE** (see below). Phase 8 performance work is preserved and re-validated on the new runtime.<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
@@ -12,16 +12,22 @@
 
 ## Phase 9 — Packaging and Distribution
 
-**Phase 9 status: `IN PROGRESS — AUDIT RECORDED, FIXES NOT YET IMPLEMENTED`.**
+**Phase 9 status: `COMPLETE`.**
 
-Starting commit: `a95c61a6ae1bce8148f807eae885d3755a7493cc` (branch `arena/f547264f-cambuz-pdf`).
-Final commit: TBD. Electron before: `28.3.3` (end-of-life). Electron after: TBD.
+- Branch: `arena/f547264f-cambuz-pdf` (all work committed here; `main` not merged).
+- Starting commit: `a95c61a6ae1bce8148f807eae885d3755a7493cc`.
+- Code commits: `6cbe602` (upgrade + fixes), `358b043` (Linux CI check fix),
+  `25dd76e` (exe metadata CI check). Validation run below is on `25dd76e`.
+- Final commit: the docs commit at the tip of `arena/f547264f-cambuz-pdf` in `git log`
+  (docs-only follow-up to `25dd76e`; the validation run above pins the code).
+- Electron before: `28.3.3` (end-of-life). Electron after: `44.7.0` (latest stable).
+- Supported platforms: Windows x64, Linux x64, macOS arm64 (see build-vs-runtime table).
+- Validation: GitHub Actions [`Desktop builds`, run 38025072964](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38025072964) — all four jobs green.
 
 > Branch note: the Phase 9 brief named branch `arena/98c3aa95-cambuz-pdf` at commit
-> `34b9796`, but this session is bound to `arena/f547264f-cambuz-pdf`. The checked-out
+> `34b9796`, but this session is bound to `arena/f547264f-cambuz-pdf`. The starting
 > `HEAD` is `a95c61a`, the merge of PR #9 from `arena/98c3aa95-cambuz-pdf`, so all
-> Phase 8 work described below is present. All Phase 9 work stays on
-> `arena/f547264f-cambuz-pdf`; `main` is not merged.
+> Phase 8 work described below was present. No unrelated work was touched.
 
 ### Starting-state audit (verified 2026-10-10, before any Phase 9 change)
 
@@ -31,54 +37,294 @@ Baseline regression suite on the starting commit: **978 passed, 0 failed, 2 skip
 Phase 7 no-Tesseract skips). Phase 8 packaged-Electron evidence is GitHub Actions run
 `38019417062` (32/32 Windows checks per packaging mode), as documented in Phase 8.
 
-Each pre-Phase-8 packaging-audit finding was re-verified against the current code:
+Each pre-Phase-8 packaging-audit finding was re-verified against the current code
+instead of assumed open:
 
 | Earlier finding | Verified starting state |
 | --- | --- |
 | “Try Sample PDF” / “Try Sample PDF Form” fail packaged (`ERR_FILE_NOT_FOUND`) | **Already fixed (Verified).** `main.js` serves bytes over the allow-listed `read-sample` IPC channel (`src/bundled-samples.cjs`); the browser preview uses a module-relative URL. Covered by `test-main-process.mjs` and the packaged smoke test. |
 | Text selection/copy broken | **Already fixed (Verified).** Selection, Ctrl+C, Windows clipboard, Hindi/Punjabi copy and the copy-denied refusal pass in packaged smoke tests. |
-| Electron 28.3.3 end-of-life | **Still open (Blocked for release).** `package.json` requires `electron ^28.0.0`, lockfile pins `28.3.3`. Latest stable on npm is `44.7.0`. Upgrade + full regression required. |
-| No application icon (`assets/icon.png` missing) | **Still open.** No `assets/` or `build/` directory exists; packaging silently uses Electron's default icon. |
-| No `LICENSE` file / third-party notices | **Still open.** `package.json` declares MIT but no license text ships; no notices file exists. |
-| No PDF file association / open-with handling | **Still open.** `main.js` reads no `process.argv`, has no `second-instance` / `open-file` handling; `package.json` has no `fileAssociations`. |
-| `express` in runtime `dependencies` | **Still open.** Only `server.js` (`npm run serve` preview) uses it, yet it ships in the desktop package. |
-| App ID `com.cambuz.pdfreader` / publisher unconfirmed | **Still open. Requires user action.** Permanent once users install. |
-| Unsigned builds (SmartScreen / Gatekeeper warnings) | **Still open. Requires user action.** No signing credentials; `CSC_IDENTITY_AUTO_DISCOVERY=false` in CI. |
-| macOS arm64-only, no mac app menu, never launched | **Still open.** Build-only in CI. |
-| Linux sandbox (`--no-sandbox` needed on CI runner) | **Still open.** Desktop AppImage behavior untested. |
-| Staging rewrites source `package.json` | **Already fixed (Verified).** `scripts/stage-app.mjs` packages `.build-app/`; source manifest untouched. |
+| Electron 28.3.3 end-of-life | **Open (Blocked for release).** Fixed in Phase 9 (see below). |
+| No application icon (`assets/icon.png` missing) | **Open.** Fixed in Phase 9 (see below). |
+| No `LICENSE` file / third-party notices | **Open.** Fixed in Phase 9 (see below). |
+| No PDF file association / open-with handling | **Open.** Fixed in Phase 9 (see below). |
+| `express` in runtime `dependencies` | **Open.** Fixed in Phase 9 (see below). |
+| App ID `com.cambuz.pdfreader` / publisher unconfirmed | **Open. Requires user action.** Still unconfirmed (see decisions). |
+| Unsigned builds (SmartScreen / Gatekeeper warnings) | **Open. Requires user action.** Still unsigned; safe signing path documented below. |
+| macOS arm64-only, no mac app menu, never launched | **Open.** Still arm64-only and unlaunched; menu unchanged (see limitations). |
+| Linux sandbox (`--no-sandbox` needed on CI runner) | **Open.** Still needed on the CI runner; desktop behavior untested. |
+| Staging rewrites source `package.json` | **Already fixed (Verified).** `scripts/stage-app.mjs` packages `.build-app/`; source manifest untouched (re-verified: clean `git status` after staging). |
 | `@napi-rs/canvas` native binding ships | **Already fixed (Verified).** Staging uses `--omit=optional` and fails if the scope is non-empty; the contents check forbids it. |
-| Non-reproducible digests | **Known.** AppImage digest changed between runs with identical inputs; verify against the run's own `SHA256SUMS.txt`. |
+| Non-reproducible digests | **Known, still true.** Re-confirmed: the Windows setup digest differs between runs `38024638266` and `38025072964` although the app payload is identical (only workflow files changed). Always verify a download against the `SHA256SUMS.txt` from its own run. |
 
-Remaining Phase 9 blockers: Electron upgrade, icon set, `LICENSE` + third-party
-notices, OS file-open integration, runtime-dependency cleanup, CI distribution
-checks, and signing/platform documentation. The sections below are filled in as
-the work lands; until then, the Phase 8 text underneath remains the last fully
-validated state.
+### What changed in Phase 9
 
-### Electron upgrade
+- **Electron `28.3.3` → `44.7.0`** (latest stable; lockfile updated consistently).
+  Breaking changes v29–v44 were reviewed against every Electron API Cambuz uses
+  (docs `breaking-changes.md` at `v44.7.0`). The only functional impact is the
+  Electron 36 removal of `PrinterInfo.isDefault`/`status`: `main.js` keeps the
+  `isDefault` field in its payload (always false now) so the preload contract is
+  unchanged, and the renderer falls back to its “Choose in system print dialog…”
+  choice, which still reaches the OS default through the native dialog. There is
+  no replacement Electron API for the default printer. Other reviewed changes
+  need no code: clipboard re-architecture (Cambuz copies through DOM events, not
+  the `clipboard` module), same-WebContents PDF rendering, `window.open`
+  resizability, Ozone/Wayland default on Linux. Two behavior notes: file dialogs
+  without an explicit `defaultPath` now start in Downloads instead of the
+  last-used folder (Electron 43; Save dialogs already pass a path, Open dialogs
+  do not), and `ELECTRON_SKIP_BINARY_DOWNLOAD` is unsupported since Electron 42
+  (removed from CI; `npm ci` no longer fetches a binary, electron-builder fetches
+  its own, and `npm start` downloads the runtime on first run).
+- **OS file-open integration.** New `src/file-open.cjs` (shared argv/PDF-path
+  parsing); `main.js` handles startup arguments, single-instance `second-instance`
+  handoff with window focus, and macOS `open-file` (including pre-ready arrival
+  via a pending slot); the renderer collects an early file through a new
+  `renderer-ready` handshake and later files over `open-file-path`, reading
+  through the existing sandboxed `read-file` channel. Re-opening the already-open
+  file is a no-op; missing files show the same clear in-app error as the Open
+  dialog. `package.json` declares `fileAssociations` for `pdf`
+  (`CambuzPDFReader.Document`, MIME `application/pdf`, role Viewer, rank
+  Alternate). 42 new unit assertions in `test-main-process.mjs`; the packaged
+  smoke test gained `--launch-pdf`/`--second-pdf` probes that launch real
+  processes (the launch path contains a space and non-ASCII characters).
+- **Window hardening (no security feature weakened).** Context isolation stays
+  on, Node integration stays off, `webSecurity` is never disabled (all three now
+  asserted in tests). Added: `setWindowOpenHandler` routes http(s) outline URLs
+  to the system browser and denies everything else (print window denies all);
+  `will-navigate` blocks page-initiated navigation away from the viewer (armed
+  only after the first load, so startup can never block itself); permission
+  request/check handlers deny everything except the Fullscreen API the reader
+  uses. The existing `window.cambuzAPI` surface is unchanged apart from the two
+  additive file-open members (`rendererReady`, `onOpenFilePath`).
+- **Icon set.** New Cambuz mark (indigo tile, document sheet, coral bookmark;
+  generator: `scripts/create-icon.py`): `assets/icon.png` (512, staged for the
+  window icon), `build/icon.ico` (multi-size Windows), `build/icon.icns`
+  (macOS), `build/icon.png` (512, Linux). Wired in `package.json`
+  (`win`/`mac`/`linux` icon); staging fails fast if any icon is missing, and
+  electron-builder itself errors on a missing icon file, so there is no silent
+  fallback to the generic Electron icon.
+- **Licensing.** New MIT `LICENSE` (matches `package.json`) shown by the NSIS
+  installer (`nsis.license`); new `THIRD-PARTY-NOTICES.md` covering the exact
+  shipped set (Electron 44.7.0 MIT, pdfjs-dist 4.10.38 Apache-2.0, pdf-lib 1.17.1
+  MIT, @pdf-lib/* MIT, pako MIT, tslib 0BSD) with full license texts, plus the
+  Electron/Chromium credits that ship next to the executable. Both files are
+  staged into the app and required by the contents check; CI asserts Electron's
+  own `LICENSE*` files are present in `win-unpacked`.
+- **Runtime cleanup.** `express` moved to `devDependencies` (`npm run serve`
+  still works for development; the preview server no longer ships — the contents
+  check now forbids `node_modules/express/`). Staging also removes the 16 empty
+  scope directories `npm ci --omit=dev --omit=optional` leaves behind. Staged
+  tree: **19.2 MiB** (was 21.4 MiB); `app.asar`: **17.7 MiB** (was 19.1 MiB).
+- **Distribution pipeline.** CI keeps the lockfile/`npm ci` procedure and the
+  Phase 8 regression gate, and adds: Start Menu shortcut + HKCU `.pdf` ProgId
+  registration asserts after silent install (and removal asserts after
+  uninstall), installed-exe ProductName/FileVersion/CompanyName asserts,
+  `.desktop` Icon/MimeType + hicolor icon + mime-XML asserts inside the AppImage,
+  `Info.plist` document-type + `icon.icns` asserts for macOS, and the OS-open
+  probes on every runtime smoke run. Checksums, artifact names, and upload order
+  are unchanged.
 
-TBD — target, breaking-change review, and regression results will be recorded here.
+### Distribution artifacts (Verified)
 
-### Distribution artifacts
+From validation run [`38025072964`](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38025072964)
+(commit `25dd76e`). Verify any download against the `SHA256SUMS.txt` in its own
+artifact — digests differ run to run (see audit table).
 
-TBD — platform, architecture, format, size, SHA-256, and CI artifact links.
+| File | Size | SHA-256 | Artifact |
+| --- | --- | --- | --- |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` | 118.3 MiB | `138baf02f2e683f3d69d5bef305a221df6c1a580bc0e09d25f6f7cab12806afd` | [cambuz-pdf-windows-x64](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38025072964/artifacts/11660138284) |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | 118.0 MiB | `ee6f07624b8619c68eb9d05b63fa641f6c75ac9271697faae7df0900eb84ecbe` | same |
+| `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | 125.1 MiB | `bd744b9f17714a653bcea7dbcb5b95410f00824c7f36a4a763d295aa5f37e0ff` | [cambuz-pdf-linux-x64](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38025072964/artifacts/11660193280) |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | 129.7 MiB | `48fa0ea46e86017de40eb9f885acc81bac36d76d15496eab1dd8385a74ac59d6` | [cambuz-pdf-macos-arm64](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38025072964/artifacts/11660098430) |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | 125.7 MiB | `d19bfdef67552cee6efe46359409dd9a11441609861033825a63790c7d8d6a77` | same |
+| `app.asar` in the Windows build (renderer payload) | 17.7 MiB | — (inside the installed app) | — |
+
+Size changes vs Phase 8 (setup 81.6 → 118.3, portable 81.4 → 118.0, AppImage
+105.5 → 125.1, dmg 96.7 → 129.7, zip 93.3 → 125.7 MiB) come entirely from the
+Electron 28 → 44 runtime upgrade (sixteen Chromium majors of growth, including
+statically linked ANGLE); the Cambuz payload itself shrank (`app.asar`
+19.1 → 17.7 MiB) through the `express` removal. No feature was added to the app
+payload to cause the growth.
 
 ### Validation
 
-TBD — build vs runtime results per platform.
+`npm test`: **1025 passed, 0 failed, 2 skipped** (128 + 59 + 54 + 133 + 268 +
+229 + 54 Phase 2–7; 19 samples; 12 context-menu; 4 text-selection; 65
+main-process; Phase 8 focused checks pass; the 2 skips are the pre-existing
+Phase 7 no-Tesseract skips). Identical results locally and in the CI `test` job.
+The Phase 8 search-cache behavior is preserved in the packaged runs below
+(cached repeat query 0.8–0.9 ms on 100 pages).
 
-### Known limitations and signing status
+| Platform | Build | Runtime validation | Result |
+| --- | --- | --- | --- |
+| Windows x64 | NSIS installer + portable (Verified) | Unpacked, silently installed, and portable apps: 35/35 smoke checks each (Verified). Install/uninstall, Start Menu shortcut, HKCU `.pdf` ProgId + open command, exe ProductName/FileVersion/CompanyName, and Electron `LICENSE*` files asserted (Verified). | **Verified** |
+| Linux x64 | AppImage (Verified) | Unpacked app under Xvfb with `--no-sandbox`: 32/32 smoke checks (Verified; 3 fewer than Windows because OS-clipboard assertions are Windows-only). `.desktop` Icon/MimeType, hicolor icons, and mime XML asserted inside the AppImage (Verified). The AppImage itself was not launched (Not verified). | **Partially verified** |
+| macOS arm64 | DMG + ZIP, unsigned (Verified) | Not launched (Not verified). `icon.icns` and `Info.plist` `CFBundleDocumentTypes` (pdf, Viewer) asserted on the build output (Verified). Intel/Universal builds do not exist (arm64 only). | **Build only** |
 
-TBD — carried forward and newly discovered limits; signing/notarization state.
+Windows packaged-app observations (run `38025072964`; three single observations
+across unpacked/installed/portable modes — order unattributed, as in Phase 8;
+same runner image `win25-vs2026`, Node `v22.23.3`, 4 EPYC 7763 CPUs, 16379 MiB
+RAM):
 
-### Manual tests still required
+| Measurement | Observed values | Notes |
+| --- | --- | --- |
+| Process launch to renderer-ready | 660.2 ms; 1,245.9 ms; 6,607.2 ms | Includes DevTools polling/attachment; spread too wide for a startup claim. |
+| Sample drop to first rendered page | 259.8 ms; 260.9 ms; 265.4 ms | Phase 8: 256.9–258.9 ms. Same ballpark. |
+| 100-page search first / cached repeat | 73.40 / 0.80 ms; 78.00 / 0.90 ms; 81.70 / 0.80 ms | Phase 8 cache intact (repeat < 1 ms). First-query values are single observations on a different CPU, not a regression claim. |
+| Print-preview preparation | 341.4 ms; 341.4 ms; 405.3 ms | 10 sheets prepared, first `252×357` sheet rendered. No OS print submission. |
+| Three open/render/close cycles | 817.7 ms; 849.8 ms; 850.1 ms total | All cycles passed with canvas release. |
+| Working set / private bytes, welcome idle | 327.5/154.1; 330.4/157.5; 360.7/161.8 MiB | Follows the launch-open probe + close (boundary changed vs Phase 8's pristine idle). Higher than Phase 8 (268.8–301.4 / 105.1–110.8), consistent with the larger Electron 44 runtime. |
+| Working set / private bytes, after first render | 373.3/180.8; 376.9/185.1; 407.7/190.4 MiB | Phase 8: 332.4–356.1 / 143.4–148.3. |
+| Working set / private bytes, after searches | 418.7/214.7; 423.6/222.1; 462.2/230.3 MiB | Phase 8: 350.5–380.3 / 155.3–157.2. |
+| Working set / private bytes, after cycles, closed | 408.3/214.6; 407.7/217.0; 439.9/221.2 MiB | Still above idle; not a leak study (same caveat as Phase 8). |
 
-TBD — precise procedures for what CI cannot validate.
+Linux observations (single unpacked run; 4 EPYC 7763 CPUs, 15990 MiB RAM,
+`ubuntu24` image): startup 5,033.3 ms (with CDP attach), DOMContentLoaded
+61.8 ms, sample drop to first page 264.3 ms, print preview 313.6 ms, 100-page
+probe first page 256.9 ms. Memory is not measured off-Windows. Full per-check
+detail is in the evidence artifacts ([Windows](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38025072964/artifacts/11659573993),
+[Linux](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38025072964/artifacts/11659778556));
+all jobs report zero error/warning annotations.
+
+What CI proves and what it does not: installer compilation, silent
+install/launch/uninstall, shortcuts, registry/mime/plist registration, launch
+with a spaced non-ASCII path, second-instance handoff, rendering, navigation,
+zoom, search (incl. repeat), selection/clipboard (Windows), Hindi/Punjabi copy,
+sample buttons, print-preview preparation, and clean shutdown are all
+**Verified** where the table says so. Print-preview preparation is still not a
+real print job (**Not verified**). Core reading needs no network by construction
+(**Verified** by code audit: no remote URLs in app code; packaged loads travel
+over local IPC/ArrayBuffer; outline links intentionally open in the system
+browser) — but no dedicated offline CI run exists. A real double-click, the GUI
+installer pages, and desktop (non-runner) behavior remain manual (see below).
+
+### Building and testing locally
+
+Prerequisites: Node 22, npm, Python 3 + Pillow (only to regenerate icons via
+`scripts/create-icon.py`), and network access to the npm registry and GitHub
+(Electron/electron-builder binaries download from GitHub releases).
+
+```bash
+npm ci              # reproducible install from the lockfile (no Electron binary yet)
+npm test            # full regression suite incl. Phase 8 and main-process checks
+npm start           # development run (downloads the Electron runtime on first launch)
+npm run serve       # browser preview at http://localhost:3000 (dev only, needs express)
+npm run build:win   # installer + portable (on Windows; needs the downloaded runtime)
+npm run build:linux # AppImage (on Linux)
+npm run build:mac   # DMG + ZIP, arm64, unsigned (on macOS)
+```
+
+`npm start` / `npm run serve` are development runs. Packaged-app validation is
+separate: build first, then `node scripts/check-packaged-app.mjs <app.asar>`
+(contents) and `node scripts/smoke-test-packaged.mjs --app <executable> --out
+<dir> [--launch-pdf <file> --second-pdf <file>]` (runtime). Always build through
+the `build:*` scripts so `scripts/stage-app.mjs` runs first, and check `git
+status` afterwards (it must stay clean — staging writes only to ignored
+`.build-app/`).
+
+### Known limitations
+
+1. **Unsigned builds (Requires user action).** All artifacts are unsigned and
+   un-notarized: Windows SmartScreen will warn on the installer (“Unknown
+   publisher”; the app runs after More info → Run anyway), and macOS Gatekeeper
+   will refuse the download until the quarantine flag is cleared (right-click →
+   Open, or `xattr -d com.apple.quarantine`). This is expected for unsigned
+   software, not a defect; signing removes it (path below).
+2. **Installer size grew ~45%** through the Electron 44 runtime (see sizes).
+   Unavoidable without staying on an end-of-life runtime.
+3. **Default-printer preselection is gone.** Electron 36 removed
+   `PrinterInfo.isDefault` with no replacement; the print dialog now starts on
+   “Choose in system print dialog…”, which still reaches the OS default. The
+   “· Default” label no longer appears.
+4. **Open dialogs start in Downloads** (Electron 43 default) instead of the
+   last-used folder. Save dialogs are unaffected (they pass a path).
+5. **macOS is arm64-only, unsigned, unlaunched, and still has no native app
+   menu.** Intel and universal builds were not attempted. The `Viewer` /
+   `Alternate` file-association rank is deliberately modest until signing exists.
+6. **The AppImage was built and inspected but never launched;** the Linux smoke
+   run covers the unpacked build under Xvfb with `--no-sandbox`. Whether a
+   desktop distro needs the same flag (or an AppArmor profile) is untested.
+7. **Windows default-app choice belongs to the user.** The installer registers
+   the `CambuzPDFReader.Document` ProgId (verified in HKCU), but Windows 10/11
+   will not silently make Cambuz the default PDF handler; the user confirms via
+   Open With / Default apps. Uninstall removes the registration (verified).
+8. **Not verified:** a real double-click on each OS, the GUI (non-silent)
+   installer pages including the license screen, icon appearance on a real
+   desktop, the native right-click menu (invisible to the smoke test), real
+   printer enumeration/submission/output, long-session memory, and the Phase 8
+   Node/PDF.js scanned-raster segfault (unchanged, still documented as a
+   separate Node-only failure; packaged scanned rendering passes).
+9. **Platform floors are now macOS 13+, Windows 10+ x64, Linux x64**
+   (Electron 44 dropped macOS 12 and all 32-bit builds).
+
+### Signing and notarization status (**Not verified**, credentials unavailable)
+
+No signing credentials exist in the repository or CI (verified: no secrets to
+leak — nothing was added). Current state: `CSC_IDENTITY_AUTO_DISCOVERY=false`
+in CI so builds never look for an identity. Safe path to signed releases:
+
+- **Windows:** obtain a code-signing certificate (OV/EV, or an Azure Trusted
+  Signing account). Add repository secrets `WIN_CSC_LINK` (base64 `.pfx`) +
+  `WIN_CSC_KEY_PASSWORD` (or `CSC_LINK`/`CSC_KEY_PASSWORD`), remove the
+  `CSC_IDENTITY_AUTO_DISCOVERY=false` env line, and re-run — electron-builder
+  signs the exe/installer/portable with no config change. For Azure Trusted
+  Signing instead, configure `win.azureSignOptions` (`publisherName` exactly as
+  on the certificate, `endpoint`, …) plus the Entra ID environment auth the
+  option requires. Expect SmartScreen reputation to build gradually even after
+  signing (new certificates warn until trust accumulates; EV shortens this).
+- **macOS:** enroll in the Apple Developer Program, create a Developer ID
+  Application certificate (`CSC_LINK`/`CSC_NAME` secret), and add notarization
+  secrets — either `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER`
+  (recommended) or `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`
+  — so electron-builder's `@electron/notarize` integration activates on the
+  existing `mac` target. Notarization is required for Gatekeeper acceptance;
+  signing alone is not enough.
+- Never commit certificates, keys, or passwords; keep them in GitHub Actions
+  secrets and out of logs (electron-builder redacts the password env vars).
+
+### Manual tests still required (Requires user action)
+
+On a normal desktop (not the CI runner), with the artifacts from run
+`38025072964`:
+
+1. **Windows GUI install:** run the setup exe unflagged; confirm the MIT license
+   page shows; change the install folder; finish; confirm the Start Menu
+   shortcut, the Cambuz icon on the installer/exe/shortcut, and launch from the
+   shortcut. Repeat the per-machine choice once (expect a UAC elevation prompt;
+   per-user must not elevate).
+2. **Windows file opening:** double-click a PDF (confirm Windows offers Cambuz
+   via Open With on first use; set “Always” and double-click again); right-click
+   → Open with → Cambuz on a path containing spaces and non-ASCII characters;
+   double-click a second PDF while Cambuz runs (window must switch, no second
+   window); delete/rename a target and double-click its stale link (expect the
+   clear in-app error, not a crash).
+3. **Windows printing:** with a real or virtual printer (e.g. Microsoft Print to
+   PDF), open Print, confirm the printer list populates, print 1 and 2 copies,
+   try the empty-printer system-dialog fallback, and inspect the output.
+4. **Native context menu:** right-click page text (Copy enabled), empty page
+   area (Copy disabled), and the search box (Cut/Copy/Paste/Select All).
+5. **Linux desktop:** on a distro with FUSE, `chmod +x` and launch the AppImage
+   from a file manager; confirm the window icon, Open With integration, and
+   whether `--no-sandbox` is needed; try setting Cambuz as the default PDF app.
+6. **macOS (Apple Silicon):** open the DMG, drag-install, clear quarantine via
+   right-click → Open; confirm launch, Open With on a PDF, and menu/window
+   sanity. There is no Intel build to test.
+7. **Offline:** disconnect the network, then open, search, zoom, and
+   print-preview a local PDF (must all work; only outline http(s) links need the
+   browser).
+8. **SmartScreen/Gatekeeper:** confirm the exact unsigned warnings above so the
+   release notes describe them accurately.
 
 ### Decisions or credentials required from the requester
 
-TBD — app ID/publisher confirmation, signing credentials, native-device tests.
+1. **App ID / publisher:** confirm `com.cambuz.pdfreader` and publisher “Cambuz”
+   (stamped as exe CompanyName, verified non-empty) before any public release —
+   the ID is permanent once users install.
+2. **Signing credentials:** provide the Windows and/or Apple secrets above (or
+   approve staying unsigned for this distribution round).
+3. **File-association rank:** `Viewer`/`Alternate` is conservative; say if a
+   future signed release should claim `Default` on macOS.
+4. **Manual tests:** run the eight procedures above on real desktops.
 
 ---
 
@@ -186,6 +432,12 @@ These are single snapshots on one virtualized Windows runner, not a long-session
 Re-run the Node benchmark with `PHASE8_BENCH_TRIALS=3 npm run benchmark:phase8`; run the focused regression checks with `npm run test:phase8`; the benchmark has no timing pass/fail thresholds. Packaged Electron validation is documented above and is run by the `Desktop builds` workflow.
 
 ## Desktop packaging — Windows x64 build (Phase 9 groundwork)
+
+> Historical note: this section records the pre–Phase 8 packaging audit and
+> groundwork. The current source of truth is the
+> [Phase 9 section](#phase-9--packaging-and-distribution) above, which resolves
+> the Electron, icon, licensing, file-association, and runtime-dependency items
+> listed here as open.
 
 ### Packaging status: `WINDOWS X64 INSTALLER AND PORTABLE BUILT AND SMOKE-TESTED IN CI; LINUX AND macOS EXPERIMENTAL; UNSIGNED; NOT RELEASED`
 
