@@ -6,6 +6,7 @@ const { getOcrStatus, recognizePng } = require('./src/ocr-engine.cjs');
 const { bundledSamplePath } = require('./src/bundled-samples.cjs');
 const { buildPageContextMenu } = require('./src/context-menu.cjs');
 const { pdfPathFromArgv } = require('./src/file-open.cjs');
+const { applyMacMenuRoles } = require('./src/mac-menu.cjs');
 
 let mainWindow;
 // A PDF named by the OS before the renderer could receive it (launch with a
@@ -27,6 +28,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Explicit (also Electron's default): the page runs in the Chromium sandbox.
+      sandbox: true,
     },
     backgroundColor: '#1e1e2e',
     show: false,
@@ -248,7 +251,7 @@ function createWindow() {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'About Cambuz PDF Reader',
-              message: 'Cambuz PDF Reader v1.1.0',
+              message: `Cambuz PDF Reader v${app.getVersion()}`,
               detail: 'A lightweight, fast PDF reader.\nRead. Search. Print. Done.',
             });
           },
@@ -257,7 +260,8 @@ function createWindow() {
     },
   ];
 
-  const menu = Menu.buildFromTemplate(template);
+  // macOS only: restore the application menu (Quit) and Edit copy/paste roles.
+  const menu = Menu.buildFromTemplate(applyMacMenuRoles(template, process.platform, 'Cambuz PDF Reader'));
   Menu.setApplicationMenu(menu);
 }
 

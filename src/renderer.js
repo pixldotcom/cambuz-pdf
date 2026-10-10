@@ -1097,6 +1097,30 @@ async function toggleFullscreen() {
   }
 }
 
+// --- Copy restriction (Phase 5, enforced on every surface in Phase 10) ---
+
+function isEditableNode(node) {
+  const el = node && node.nodeType === 1 ? node : node && node.parentElement;
+  return Boolean(el && typeof el.closest === 'function' && el.closest('input, textarea, [contenteditable="true"]'));
+}
+
+/**
+ * Capture-phase handler for copy, cut and dragstart. Only acts when the open
+ * document denies copying. It is a Cambuz-side policy, not DRM: it stops Cambuz
+ * from passing the text on, and does not prevent other software from reading it.
+ */
+function refuseRestrictedCopy(event) {
+  if (!isBlocked(documentSecurity, 'copy')) return;
+  const focusIsEditable = isEditableNode(document.activeElement);
+  const pageSelection = window.getSelection ? window.getSelection().toString() : '';
+  // A focused text field may copy its own text, provided no page text is selected.
+  if (focusIsEditable && pageSelection === '') return;
+  event.preventDefault();
+  const message = refusalMessage(documentSecurity, 'copy');
+  setStatus(message);
+  showError(message);
+}
+
 // --- Text selection (Phase 2) ---
 
 function selectPageText() {
@@ -1860,16 +1884,14 @@ function setupEvents() {
     setReopenLast(elements.chkReopenLast.checked);
   });
 
-  // Phase 5: refuse to hand the page text to the clipboard when the document
-  // denies copying. The text still renders and stays searchable.
-  elements.textLayer.addEventListener('copy', (event) => {
-    if (isBlocked(documentSecurity, 'copy')) {
-      event.preventDefault();
-      const message = refusalMessage(documentSecurity, 'copy');
-      setStatus(message);
-      showError(message);
-    }
-  });
+  // Phase 5/10: one copy policy for every surface. When the document denies
+  // copying, text cannot leave through the clipboard or a drag, whether it was
+  // selected in the page, the bookmarks panel, or elsewhere in the window (Ctrl+C,
+  // the context-menu Copy item, or a drag). Editable fields such as the search box
+  // are exempt, except when page text is also selected.
+  document.addEventListener('copy', refuseRestrictedCopy, true);
+  document.addEventListener('cut', refuseRestrictedCopy, true);
+  document.addEventListener('dragstart', refuseRestrictedCopy, true);
 
   // The status-bar lock chip is a button as well as a label.
   elements.statusLock.addEventListener('keydown', (event) => {

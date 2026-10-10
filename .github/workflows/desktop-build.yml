@@ -113,7 +113,8 @@ jobs:
           $versionInfo = (Get-Item $exe).VersionInfo
           Write-Host "ProductName=$($versionInfo.ProductName) FileVersion=$($versionInfo.FileVersion) CompanyName=$($versionInfo.CompanyName) LegalCopyright=$($versionInfo.LegalCopyright)"
           if ($versionInfo.ProductName -ne 'Cambuz PDF Reader') { throw "Unexpected ProductName: $($versionInfo.ProductName)" }
-          if ($versionInfo.FileVersion -notlike '1.1.0*') { throw "Unexpected FileVersion: $($versionInfo.FileVersion)" }
+          $expectedVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($versionInfo.FileVersion -notlike "$expectedVersion*") { throw "Unexpected FileVersion: $($versionInfo.FileVersion) (package.json has $expectedVersion)" }
           if ([string]::IsNullOrWhiteSpace($versionInfo.CompanyName)) { throw 'CompanyName (publisher) is empty on the installed executable' }
           # Start Menu shortcut (per-user install) and .pdf file association.
           $startMenuLink = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Cambuz PDF Reader.lnk'
