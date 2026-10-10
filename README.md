@@ -2,11 +2,224 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 9 — Packaging and Distribution **COMPLETE** (see below). Phase 8 performance work is preserved and re-validated on the new runtime.<br>
+**Project status:** Phase 10 — Release quality and final readiness **PARTIAL** (see below). Phase 9 packaging is complete; Phase 8 performance results are preserved.<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
 **Development approach:** Phase-by-phase, testable milestones
+
+---
+
+## Phase 10 — Release quality and final readiness
+
+**Phase 10 status: `PARTIAL`.** Automated regression and packaged-app checks pass on the
+release candidate in CI. Native desktop checks on Linux and macOS, physical printing,
+manual device testing and code signing are **not** complete and are listed under
+[Manual actions required](#manual-actions-required-from-the-maintainer).
+
+- Branch: `arena/e73ef198-cambuz-pdf`. Not merged into `main`; merge requires explicit approval.
+- Starting commit (`main`): `5578c7348c6d8c2022092e232292b6f5f606dcca` (PR #10 merge).
+- Phase 10 commits: `08d4a35` (macOS menu roles), `279ef53` (explicit renderer sandbox),
+  and the README docs commit at the tip of the branch.
+- Release-candidate CI run: [`Desktop builds`, run 38030734309](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38030734309)
+  on `279ef53`. All four jobs succeeded and every step of the Windows, Linux and macOS
+  jobs succeeded.
+- Baseline run on `main`: [run 38027635457](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38027635457) (`5578c73`), all four jobs succeeded.
+
+### Release status and supported platforms
+
+| Platform | Artifact | Build | Automated packaged-app test | Native desktop launch verified by a person | Status |
+| --- | --- | --- | --- | --- | --- |
+| Windows x64 | NSIS installer and portable `.exe` (unsigned) | Passed (CI) | **Passed**: unpacked, silently installed, and portable runs, 35/35 checks each, on a GitHub Windows runner | Not performed | Supported for pre-release evaluation |
+| Linux x64 | AppImage (unsigned) | Passed (CI) | **Passed**: packaged app under Xvfb, 32/32 checks, with `--no-sandbox` (CI only) | Not performed | Pre-release; desktop integration only partly tested |
+| macOS arm64 | DMG and ZIP (unsigned, not notarized) | Passed (CI) | **Not run**: build, contents and `Info.plist` checks only; app never launched | Not performed | Pre-release; build-only evidence |
+| Windows arm64, Linux arm64, macOS x64 | — | Not built | — | — | Not supported |
+
+"Build passed" means electron-builder produced the artifact and the contents checks passed.
+"Automated packaged-app test passed" means the headless smoke harness drove the packaged
+Electron app in CI. Neither is a substitute for a person launching the app on that OS.
+
+### Evidence from CI (release-candidate run 38030734309, commit `279ef53`)
+
+Windows x64 (per packaging mode; the three modes are unpacked, silently installed, and portable):
+
+- 35/35 packaged checks passed in each mode, including launch with a PDF path (a non-ASCII filename with spaces), second-launch hand-off, Open PDF switching, both bundled samples, the form sample's fillable fields, drop-to-open, text layer alignment, page navigation, zoom within budget, print-preview preparation, mouse selection, Ctrl+C and the Windows clipboard, Hindi and Punjabi copy, refusal of copy in a copy-protected PDF, 100-page search and repeat search, scanned-page rendering with zero selectable characters, three open/render/close cycles, and **zero uncaught renderer exceptions**.
+- Installer: silent install, Start Menu shortcut, `.pdf` association (`CambuzPDFReader.Document`), installed-exe ProductName/FileVersion/CompanyName asserts, then uninstall with the same checks removed.
+- Print: CI prepared a print-ready PDF and rendered a preview sheet. **No job was sent to any physical or virtual printer.**
+
+Linux x64 (`cambuz-pdf-reader`, under Xvfb): 32/32 packaged checks passed, covering the same reading, search, selection, copy, scanned-page and open/close probes (without the Windows clipboard and OS-installation checks). The `.desktop` entry, icon and MIME wiring inside the AppImage were also asserted.
+
+macOS arm64: the build, the packaged-contents check, and the document-type and icon checks in `Info.plist` passed. The app was **not launched**.
+
+### Defects fixed in Phase 10
+
+1. **macOS application menu and Edit roles (fixed in code, not yet verified natively).** The custom
+   menu replaced Electron's default macOS menu, so there was no application menu (Quit, Hide,
+   Services, About) and no standard Edit copy/cut/paste roles. On macOS, Cmd+C is routed through
+   those roles, so copying may not have worked. `src/mac-menu.cjs` adds the application menu and
+   Edit roles on macOS only, and removes the duplicate Cmd+Q accelerator from File > Exit. The
+   Windows and Linux menu templates are returned unchanged. Covered by 11 assertions in
+   `scripts/test-main-process.mjs`; **not** run in a macOS app.
+2. **Explicit renderer sandbox.** `sandbox: true` was only the Electron default. It is now set
+   explicitly on the main window and asserted by a test. No behaviour change is expected.
+
+No other release-blocking defect was reproduced in the automated suite or in the CI packaged runs.
+
+### Security boundary (static review and tests)
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Context isolation | Enabled | `main.js` `webPreferences`; test-main-process |
+| Node integration | Disabled | `main.js`; test-main-process |
+| Renderer sandbox | Enabled, explicit | `main.js`; new assertion |
+| `webSecurity` | Never disabled | `main.js` comment and test |
+| Preload surface | Named `cambuzAPI` bridge only; no raw `ipcRenderer` exposed | `preload.js` |
+| External links | `http(s)` outline links open in the system browser; other new windows denied | `setWindowOpenHandler` in `main.js` |
+| Navigation | Page-initiated navigation away from the viewer is blocked after first load | `will-navigate` in `main.js` |
+| Permissions | Denied except the Fullscreen API | permission handlers in `main.js` |
+| Uncaught renderer exceptions | 0 in all Windows and Linux packaged runs | CI annotations, run 38030734309 |
+
+Not verified: a dedicated crash-dump scan (that check does not exist in this repository), and a
+fuzzing pass over malformed IPC messages.
+
+### Test results
+
+- **Local regression suite** (`npm test`, commit `279ef53`): **1085 passed, 0 failed, 2 skipped**.
+  The 2 skips are Phase 7 OCR checks that need the optional Tesseract engine.
+  Main-process tests: 77 passed (Phase 10 added 11 menu and 1 sandbox assertion).
+- **CI `Regression tests (Linux)`** on `279ef53`: success.
+- **Packaged-app checks** (CI): Windows 3 × 35/35 passed; Linux 1 × 32/32 passed; macOS build-only.
+- **Not run in Phase 10:** a local Electron launch (the Electron binary download from GitHub is
+  blocked in this environment), physical printing, OS file-open on native Linux and macOS, the
+  Phase 6 device checks, and the Phase 7 native OCR check.
+
+### Reading, search, selection and printing: what the evidence covers
+
+| Area | Evidence | Limit |
+| --- | --- | --- |
+| Open via UI, command line and OS file-open | Windows: launch argument, second launch hand-off, drag-and-drop; Linux: launch argument and second PDF. | macOS `open-file` was not run natively. |
+| First and middle pages | First render, and navigation to pages 5 and 6 in both Windows and Linux runs. | Last-page navigation is not in the CI probes. |
+| Zoom, fit-to-width, fit-to-page | Zoom in/out within the pixel budget (CI). | Fit modes were not individually exercised in CI. |
+| Repeated open and close | Three open/render/close cycles per run, viewer canvas released. | Not a long-session leak study. |
+| Empty, malformed, encrypted, damaged PDFs | Covered by the existing Phase 2–5 automated tests. | Not re-run natively in Phase 10. |
+| Search, repeated search, no result | 100-page search and repeat search (CI). | No-result wording not separately asserted in CI. |
+| Selection and Ctrl+C | Mouse selection and Ctrl+C on Windows and Linux; Windows clipboard receives Unicode. | macOS Cmd+C depends on the fix above and is unverified. |
+| Hindi and Punjabi | Selection and copy on Windows and Linux (CI). | Depends on the PDF's font mapping; see limitations. |
+| Scanned PDFs | Scanned page renders with zero selectable characters (CI). | Text needs OCR (optional Phase 7 engine). |
+| Print preview and page ranges | Preview sheets prepared and rendered (CI). | No physical print. Paper size, margins and scaling not individually tested natively. |
+| Merge, split, extract, reorder, delete | Covered by Phase 4 automated tests. | Not run natively in Phase 10. |
+| Password-protected PDFs and forms | Form sample shows 8 fillable widgets (CI); encrypted fixtures in Phase 5 tests. | Not re-run natively in Phase 10. |
+
+### Performance (measured, compared with Phase 8)
+
+Phase 8 numbers come from [run 38019417062](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38019417062)
+(Electron 28.3.3, commit `cb68803`). Phase 10 numbers come from runs 38030404030 (commit `08d4a35`) and 38030734309 (commit `279ef53`) (Electron 44.7.0),
+so each Phase 10 range covers six observations: two runs times three packaging modes. Each observation is a
+single reading on one GitHub runner, not a median, and runner CPU models vary between runs. The Phase 8 ranges cover three observations.
+Process counts also differ (4 or 6 processes in the memory snapshot), which affects the memory rows. These are **not** timing targets, and no improvement is claimed.
+
+| Measurement (Windows, three packaging modes) | Phase 8 (Electron 28) | Phase 10 (Electron 44) | Reading |
+| --- | --- | --- | --- |
+| Sample PDF open to first page rendered (ms) | 256.9–258.9 | 258.8–276.7 | Up to about 18 ms higher at the top of the range; no clear change in the median. |
+| 100-page search, first query (ms) | 51.9–53.9 | 51.9–73.7 | Run 38030404030 measured 70–74 ms and run 38030734309 measured 52–60 ms. The Phase 9 `main` run measured 52–63 ms. Not conclusive; runner variance is likely. Needs a same-runner comparison. |
+| 100-page search, cached repeat (ms) | 0.9–1.2 | 0.7–1.3 | No change observed. |
+| Three open/render/close cycles, total (ms) | 800.7–817.6 | 800.7–833.5 | No change observed. |
+| Print-preview preparation, first sheet (ms) | 301.1–358.8 | 314.3–390.4 | Slightly higher at the top of the range; no clear change. |
+| Launch to renderer-ready (ms) | 559.5–9,078.5 | 581.1–6,679.0 | Very wide spread in both phases; no reliable comparison. |
+| Idle welcome screen, private bytes (MiB) | 105.1–110.8 | 154.1–164.6 | **Higher by about 50 MiB** in every Phase 10 observation. Electron 44 runtime footprint is presumed but not investigated. |
+| After three cycles, private bytes (MiB) | 155.8–157.8 | 209.7–223.3 | **Higher by about 60 MiB.** |
+
+Packaging size (from the `Build output` annotations):
+
+| File | Phase 8 (run 38019417062) | Phase 10 (run 38030734309) |
+| --- | ---: | ---: |
+| Windows installer (`-setup.exe`) | 81.6 MiB | 118.3 MiB |
+| Windows portable (`-portable.exe`) | 81.4 MiB | 118.0 MiB |
+| Linux AppImage | 105.5 MiB | 125.1 MiB |
+| macOS DMG | 96.7 MiB | 129.7 MiB |
+| macOS ZIP | 93.3 MiB | 125.7 MiB |
+| Renderer payload `app.asar` (Windows) | 19.1 MiB | 17.7 MiB |
+
+The installer growth is about 37 MiB (about 45%) on Windows. It comes from the Electron 44 runtime,
+since the renderer payload shrank. The Phase 9 runtime cleanup is in place. Reducing the runtime
+footprint is not in scope for Phase 10 and is recorded as a follow-up.
+
+### Identity and metadata consistency
+
+| Item | Value | Where checked |
+| --- | --- | --- |
+| Product name | `Cambuz PDF Reader` | `package.json`, `src/index.html`, CI ProductName assert |
+| Version | `1.1.0` | `package.json`, artifact names, CI FileVersion assert. The About dialog in `main.js` **hard-codes** `v1.1.0`; it must be updated with the version. |
+| App ID | `com.cambuz.pdfreader` | `package.json` `build.appId`. **Unchanged; unconfirmed.** Changing it after release would create a new app identity. |
+| Publisher (`CompanyName`) | `Cambuz` (from `author`) | CI asserts it is non-empty. **Unchanged; unconfirmed.** |
+| Copyright | `Copyright (c) 2026 Cambuz` | `LICENSE`, `package.json` |
+| Licence | MIT, with third-party notices | `LICENSE`, `THIRD-PARTY-NOTICES.md`, shipped in the installer |
+| Icons | `.ico`, `.icns`, `.png` | `build/`, CI icon checks in the AppImage and `Info.plist` |
+
+### Known limitations and unresolved issues
+
+1. **Unsigned builds.** Windows SmartScreen will warn on the installer and portable executable. Gatekeeper will block the unsigned, un-notarized macOS app unless the user overrides it. See signing below.
+2. **Native desktop coverage is partial.** Linux was tested headless under Xvfb with `--no-sandbox`. macOS was never launched. Neither platform has been tested by a person on real hardware.
+3. **`--no-sandbox` in CI only.** The Linux smoke job needs it because the runner restricts user namespaces. The shipped app does not pass the flag. An AppImage on a hardened distribution may still need an AppArmor profile or the same flag. Not tested.
+4. **Copy restriction is a product decision.** A PDF whose permissions deny copying keeps its text non-selectable, and Cambuz says so. Whether to honour that flag is undecided.
+5. **Scanned pages need OCR.** They have no text layer. Optional OCR (Phase 7) needs the Tesseract engine and has not had its native desktop check.
+6. **Broken font mappings.** Some PDFs have missing or broken ToUnicode mappings. Copied text may be missing or wrong. Cambuz does not substitute characters. See the Phase 6 limitations.
+7. **macOS menu fix unverified.** Quit, Hide and Cmd+C on macOS are fixed in code and covered by unit assertions only.
+8. **Higher idle memory and installer size** on Electron 44, as measured above. No investigation yet.
+9. **The About dialog version is hard-coded** and must be kept in step with `package.json`.
+10. **Non-reproducible digests.** The AppImage, DMG and ZIP digests differ between builds with identical inputs. Verify a download against the `SHA256SUMS.txt` from its own run.
+11. **Historical blocker list.** The "Known limitations and blockers before a public release" list in the Desktop packaging section predates Phase 9. Several items were resolved in Phase 9; the list is kept for history.
+12. **Phase 6 device checks and the Phase 7 native OCR check** remain outstanding (see each phase).
+
+### Signing and notarization status
+
+**Not signed. Not notarized.** No certificates or secrets were available. Two separate paths are needed:
+
+- **Windows:** an Authenticode code-signing certificate (EV or standard) applied to the installer and portable `.exe`. Until then, expect SmartScreen warnings.
+- **macOS:** an Apple Developer ID Application certificate, `codesign` with hardened runtime, and notarization with `notarytool`, before the DMG is distributed to users.
+
+CI is set to `CSC_IDENTITY_AUTO_DISCOVERY: false`, so no signing identity is picked up accidentally.
+
+### Build and test commands
+
+```bash
+npm ci                 # installs dependencies; Electron binary is fetched on first run
+npm test               # full regression suite (Phases 2–8), about 30 seconds
+npm run build:win      # NSIS installer and portable exe (Windows x64)
+npm run build:linux    # AppImage (Linux x64)
+npm run build:mac      # DMG and ZIP (macOS arm64)
+node scripts/check-packaged-app.mjs dist/win-unpacked/resources/app.asar   # packaged contents check
+node scripts/smoke-test-packaged.mjs --app "dist/win-unpacked/Cambuz PDF Reader.exe" --out smoke/local --timeout 180   # headless packaged smoke test (Windows)
+```
+
+CI artifacts (run 38030734309, retention 30 days for the installers and 14 days for the smoke evidence):
+
+- [Windows installer and portable (`cambuz-pdf-windows-x64`)](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38030734309/artifacts/11661613611)
+- [Windows smoke-test evidence](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38030734309/artifacts/11662200151)
+- [Linux AppImage (`cambuz-pdf-linux-x64`)](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38030734309/artifacts/11661538423)
+- [Linux smoke-test evidence](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38030734309/artifacts/11661618588)
+- [macOS DMG and ZIP (`cambuz-pdf-macos-arm64`)](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38030734309/artifacts/11661583629)
+
+SHA-256 digests from this run (verify against the `SHA256SUMS.txt` in the same artifacts):
+
+| File | SHA-256 |
+| --- | --- |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` | `ff4971590baa50307ad350acc3d531d24f8892dd1f55243a29f239fe68da3a97` |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | `34a177eef57e1c12a61150afd7724faf25cc8254f2e333b6cb9946c62a38664b` |
+| `Cambuz-PDF-Reader-1.1.0-linux-x86_64.AppImage` | `fd1bac1080e5c988d1831f0cc07143a1d667d58e5db8b65fbee532d2d7a8a6cb` |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.dmg` | `f78d9b68c77d1ea759a67cb8a20fff3f103fbcea33ec2f825149937c9e8d0762` |
+| `Cambuz-PDF-Reader-1.1.0-mac-arm64.zip` | `607c1dba33087861564eaffa6d92191a32fbfc8693aeb6c72d84e8f818e1d890` |
+
+### Manual actions required from the maintainer
+
+1. **Confirm the app ID `com.cambuz.pdfreader` and publisher `Cambuz`.** Both are permanent once users install the app. Changing them later creates a second application identity. Approval is required before any change.
+2. **Choose a signing path:** get a Windows code-signing certificate and an Apple Developer ID with notarization, or accept unsigned pre-release builds with the warnings above.
+3. **Decide the copy-restriction policy:** honour the PDF's "copying not allowed" flag (current behaviour) or ignore it.
+4. **Physical printing:** print a test page to at least one real printer on Windows, and ideally on Linux and macOS. Check paper size, orientation, margins and scaling.
+5. **Native desktop tests:** on a Windows PC, install and run the installer, then test by hand (open, double-click a PDF, search, copy, print). On a Linux desktop, run the AppImage with and without `--no-sandbox`. On an Apple Silicon Mac, open the DMG, launch the app, and check Cmd+Q, Cmd+C and Open With.
+6. **Accept or reject the Electron 44 footprint:** approve the +37 MiB installer and the higher idle memory, or ask for an investigation into the runtime footprint.
+7. **Approve the merge to `main`.** Nothing has been merged.
+8. **Phase 6 device checks and Phase 7 native OCR check** still need a person on the target machines.
 
 ---
 
@@ -586,6 +799,8 @@ page offers Copy and Select All Text on Page. In a text field it offers the
 standard editing commands.
 
 #### Known limitations and blockers before a public release
+
+> **Historical (written before Phase 9; kept for the record).** Items 1 (Electron end-of-life), 4 (file association), 5 (icon), 6 (licence) and 7 (`express`) were resolved in Phase 9. Item 10's missing macOS app menu and Edit roles were addressed in Phase 10 (code only; not verified in a running macOS app). Items 2 (unsigned), 3 (copy restriction), 8 (app ID and publisher) and 9 (Linux sandbox) remain open. The current limitations are in [Phase 10](#phase-10--release-quality-and-final-readiness).
 
 1. **Electron 28.3.3 is end-of-life.** Electron supports only its three latest
    stable major versions ([endoflife.date](https://endoflife.date/electron)). The
