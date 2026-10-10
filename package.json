@@ -18,7 +18,7 @@
     "samples:secure": "node scripts/create-secure-samples.js && python3 scripts/create-secure-samples.py",
     "samples:phase6": "python3 scripts/create-phase6-samples.py",
     "samples:phase7": "node scripts/create-phase7-samples.mjs",
-    "test": "node scripts/test-phase2.mjs && node scripts/test-phase2-dom.mjs && node scripts/test-phase3.mjs && node scripts/test-phase4.mjs && node scripts/test-phase5.mjs && node scripts/test-phase6.mjs && node scripts/test-phase7.mjs && node scripts/test-samples.mjs && node scripts/test-context-menu.mjs && node scripts/test-text-selection.mjs && node scripts/test-main-process.mjs",
+    "test": "node scripts/test-phase2.mjs && node scripts/test-phase2-dom.mjs && node scripts/test-phase3.mjs && node scripts/test-phase4.mjs && node scripts/test-phase5.mjs && node scripts/test-phase6.mjs && node scripts/test-phase7.mjs && node scripts/test-samples.mjs && node scripts/test-context-menu.mjs && node scripts/test-text-selection.mjs && node scripts/test-main-process.mjs && node scripts/test-phase8.mjs",
     "test:node": "node scripts/test-phase2.mjs",
     "test:dom": "node scripts/test-phase2-dom.mjs",
     "test:phase3": "node scripts/test-phase3.mjs",
@@ -26,7 +26,9 @@
     "test:phase5": "node scripts/test-phase5.mjs",
     "test:phase6": "node scripts/test-phase6.mjs",
     "test:phase7": "node scripts/test-phase7.mjs",
-    "test:packaged": "node scripts/smoke-test-packaged.mjs"
+    "test:packaged": "node scripts/smoke-test-packaged.mjs",
+    "test:phase8": "node scripts/test-phase8.mjs",
+    "benchmark:phase8": "node --expose-gc scripts/benchmark-phase8.mjs"
   },
   "author": "Cambuz",
   "license": "MIT",

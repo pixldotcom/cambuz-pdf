@@ -6,6 +6,15 @@
 // Undo keeps a short in-memory history until the document is closed.
 
 import {
+  CanvasLruCache,
+  getCanvasRenderSize,
+  getThumbnailViewportScale,
+  THUMBNAIL_CACHE_MAX_ENTRIES,
+  THUMBNAIL_CACHE_MAX_PIXELS,
+  THUMBNAIL_CANVAS_MAX_DIMENSION,
+  THUMBNAIL_CANVAS_MAX_PIXELS,
+} from './canvas-budget.js';
+import {
   appendPdfs,
   computeMove,
   deletePages,
@@ -99,6 +108,14 @@ export class PageToolsController {
     this.thumbDoc = null;
     this.cells = [];
     this.observer = null;
+    this.fallbackScrollHandler = null;
+    this.fallbackRefreshTimer = null;
+    this.thumbGeneration = 0;
+    this.thumbnailCache = new CanvasLruCache({
+      maxEntries: THUMBNAIL_CACHE_MAX_ENTRIES,
+      maxPixels: THUMBNAIL_CACHE_MAX_PIXELS,
+      onEvict: (entry) => this.releaseThumbnail(entry),
+    });
 
     this.bindEvents();
     this.updateActionState();
@@ -183,6 +200,7 @@ export class PageToolsController {
   close(restoreFocus = true) {
     if (!this.opened) return;
     this.opened = false;
+    this.loadVersion += 1;
     this.ui.dialog.style.display = 'none';
     this.ui.toolbarButton.setAttribute('aria-expanded', 'false');
     this.disposeThumbnails();
@@ -273,11 +291,45 @@ export class PageToolsController {
       `${meta.pageCount} page${meta.pageCount === 1 ? '' : 's'} · Creator: ${meta.creator || '—'} · Producer: ${meta.producer || '—'}`;
   }
 
+  releaseThumbnail(entry) {
+    if (!entry) return;
+    entry.rendered = false;
+    entry.pixelCount = 0;
+    if (entry.canvas) {
+      entry.canvas.width = 0;
+      entry.canvas.height = 0;
+    }
+    if (this.observer && entry.cell?.isConnected) this.observer.observe(entry.cell);
+    else if (this.fallbackScrollHandler && entry.cell?.isConnected) this.scheduleFallbackRefresh();
+  }
+
+  scheduleFallbackRefresh() {
+    if (this.fallbackRefreshTimer !== null) return;
+    this.fallbackRefreshTimer = setTimeout(() => {
+      this.fallbackRefreshTimer = null;
+      this.refreshFallbackThumbnails();
+    }, 0);
+  }
+
   disposeThumbnails() {
+    this.thumbGeneration += 1;
     if (this.observer) {
       this.observer.disconnect();
       this.observer = null;
     }
+    if (this.fallbackScrollHandler) {
+      this.ui.gridScroll.removeEventListener('scroll', this.fallbackScrollHandler);
+      this.fallbackScrollHandler = null;
+    }
+    if (this.fallbackRefreshTimer !== null) {
+      clearTimeout(this.fallbackRefreshTimer);
+      this.fallbackRefreshTimer = null;
+    }
+    for (const entry of this.cells) {
+      try { entry.renderTask?.cancel(); } catch (_) { /* already complete */ }
+    }
+    this.thumbnailCache.clear();
+    for (const entry of this.cells) this.releaseThumbnail(entry);
     if (this.thumbDoc) {
       const doc = this.thumbDoc;
       this.thumbDoc = null;
@@ -302,6 +354,12 @@ export class PageToolsController {
       frame.className = 'po-thumb';
       const canvas = document.createElement('canvas');
       canvas.className = 'po-canvas';
+      // Do not retain the browser's default 300 × 150 backing store for every
+      // page placeholder; large page grids start with zero canvas pixels.
+      canvas.width = 0;
+      canvas.height = 0;
+      canvas.style.width = `${THUMB_CSS_WIDTH}px`;
+      canvas.style.height = '40px';
       frame.appendChild(canvas);
       const label = document.createElement('span');
       label.className = 'po-label';
@@ -309,7 +367,7 @@ export class PageToolsController {
       cell.append(frame, label);
       cell.addEventListener('click', (event) => this.onCellClick(position, event));
       grid.appendChild(cell);
-      this.cells.push({ cell, canvas, rendered: false, pending: false });
+      this.cells.push({ cell, canvas, rendered: false, pending: false, renderTask: null, pixelCount: 0 });
     }
     this.syncSelectionClasses();
     this.observeThumbnails();
@@ -317,21 +375,46 @@ export class PageToolsController {
   }
 
   observeThumbnails() {
+    const version = this.loadVersion;
+    const generation = this.thumbGeneration;
     if (typeof IntersectionObserver === 'undefined') {
-      this.cells.forEach((_, position) => this.renderThumbnail(position));
+      // Older engines use scroll geometry instead of painting every page up
+      // front. This keeps fallback memory and CPU proportional to what is seen.
+      this.fallbackScrollHandler = () => this.scheduleFallbackRefresh();
+      this.ui.gridScroll.addEventListener('scroll', this.fallbackScrollHandler, { passive: true });
+      this.refreshFallbackThumbnails();
       return;
     }
-    this.observer = new IntersectionObserver(
+    const observer = new IntersectionObserver(
       (entries) => {
+        if (
+          version !== this.loadVersion ||
+          generation !== this.thumbGeneration ||
+          observer !== this.observer
+        ) return;
         for (const entry of entries) {
-          if (entry.isIntersecting) {
-            this.renderThumbnail(Number(entry.target.dataset.position));
-          }
+          if (entry.isIntersecting) this.renderThumbnail(Number(entry.target.dataset.position));
         }
       },
       { root: this.ui.gridScroll, rootMargin: '200px 0px' }
     );
-    for (const { cell } of this.cells) this.observer.observe(cell);
+    this.observer = observer;
+    for (const { cell } of this.cells) observer.observe(cell);
+  }
+
+  refreshFallbackThumbnails() {
+    if (!this.fallbackScrollHandler || !this.opened) return;
+    const root = this.ui.gridScroll;
+    const rootRect = root.getBoundingClientRect();
+    if (rootRect.width <= 0 && rootRect.height <= 0) return;
+    for (let position = 0; position < this.cells.length; position += 1) {
+      const entry = this.cells[position];
+      if (entry.rendered || entry.pending) continue;
+      const rect = entry.cell.getBoundingClientRect();
+      if (rect.bottom >= rootRect.top - 200 && rect.top <= rootRect.bottom + 200) {
+        this.renderThumbnail(position);
+      }
+    }
   }
 
   async renderThumbnail(position) {
@@ -339,26 +422,61 @@ export class PageToolsController {
     const doc = this.thumbDoc;
     if (!entry || !doc || entry.rendered || entry.pending) return;
     const version = this.loadVersion;
+    const generation = this.thumbGeneration;
     entry.pending = true;
+    let page = null;
+    let task = null;
     try {
-      const page = await doc.getPage(position + 1);
-      if (version !== this.loadVersion) return;
+      page = await doc.getPage(position + 1);
+      if (
+        version !== this.loadVersion ||
+        generation !== this.thumbGeneration ||
+        doc !== this.thumbDoc
+      ) return;
       const base = page.getViewport({ scale: 1 });
-      const viewport = page.getViewport({ scale: THUMB_CSS_WIDTH / base.width });
+      const scale = getThumbnailViewportScale(base.width, base.height, THUMB_CSS_WIDTH, {
+        maxPixels: THUMBNAIL_CANVAS_MAX_PIXELS,
+        maxDimension: THUMBNAIL_CANVAS_MAX_DIMENSION,
+      });
+      const viewport = page.getViewport({ scale });
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const size = getCanvasRenderSize(viewport.width, viewport.height, dpr, {
+        maxPixels: THUMBNAIL_CANVAS_MAX_PIXELS,
+        maxDimension: THUMBNAIL_CANVAS_MAX_DIMENSION,
+      });
       const canvas = entry.canvas;
-      canvas.width = Math.floor(viewport.width * dpr);
-      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.width = size.width;
+      canvas.height = size.height;
       canvas.style.width = `${Math.floor(viewport.width)}px`;
       canvas.style.height = `${Math.floor(viewport.height)}px`;
       const ctx = canvas.getContext('2d');
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      if (version === this.loadVersion) entry.rendered = true;
+      if (!ctx) throw new Error('Canvas is unavailable for this page preview.');
+      ctx.setTransform(size.scale, 0, 0, size.scale, 0, 0);
+      task = page.render({ canvasContext: ctx, viewport });
+      entry.renderTask = task;
+      await task.promise;
+      if (
+        version !== this.loadVersion ||
+        generation !== this.thumbGeneration ||
+        doc !== this.thumbDoc
+      ) return;
+      entry.rendered = true;
+      entry.pixelCount = canvas.width * canvas.height;
+      this.thumbnailCache.touch(entry, entry.pixelCount);
     } catch (error) {
-      if (version === this.loadVersion) entry.cell.title = 'Preview unavailable';
+      if (
+        version === this.loadVersion &&
+        generation === this.thumbGeneration &&
+        error?.name !== 'RenderingCancelledException'
+      ) {
+        entry.cell.title = 'Preview unavailable';
+        entry.canvas.width = 0;
+        entry.canvas.height = 0;
+      }
     } finally {
+      if (entry.renderTask === task) entry.renderTask = null;
       entry.pending = false;
+      try { page?.cleanup(); } catch (_) { /* ignore */ }
     }
   }
 

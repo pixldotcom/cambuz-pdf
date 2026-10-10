@@ -2,13 +2,84 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 7 — optional, local OCR UI/IPC and raster-only language fixtures implemented. OCR needs a separately installed Tesseract 4+ engine and language data; this sandbox has no native Tesseract/Electron runtime, so desktop CLI integration remains pending a Windows check.<br>
+**Project status:** Phase 8 — performance audit, bounded rendering/cache work, regression tests, and repeatable benchmark probes implemented. Native Electron packaging/performance and scanned-page raster timings remain unavailable in this sandbox; see the Phase 8 limitations below.<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
 **Development approach:** Phase-by-phase, testable milestones
 
 ---
+
+## Phase 8 — Performance audit, measurement and optimization
+
+**Audit status: PARTIALLY VERIFIED.** The renderer/search/canvas changes and the automated regressions below pass. Native Electron startup, packaged-app smoke tests, and production Chromium memory/timing could not be measured here because the Electron runtime download is blocked; the scanned-PDF raster probe also remains unavailable after a native canvas crash. No application feature or visual redesign was removed, and no dependency version was changed for performance.
+
+### What changed
+
+- `src/search.js` now keeps an **8 MiB / 2,048-page LRU** of extracted page text and its comparison form. A repeat query over the same document reuses text instead of asking PDF.js to extract every page again. Oversized page strings are not retained; document replacement/close clears the cache, and a late in-flight extraction cannot refill it after close.
+- `src/canvas-budget.js` bounds the viewer backing store to **16 million pixels and 8,192 px per dimension**. Thumbnail canvases are capped at **250,000 pixels / 4,096 px per dimension**; retained thumbnail bitmaps share a **4 million-pixel / 64-entry LRU**.
+- `src/sidebar.js` and `src/pdf-ops-ui.js` create zero-backing-store placeholders and render nearby thumbnails lazily. Both use an `IntersectionObserver` where available and a scroll-geometry fallback otherwise. Eviction releases canvas pixels; rotation/close cancels outstanding thumbnail tasks and page resources are cleaned up.
+- `src/renderer.js` coalesces page/zoom requests into a latest-request render queue, cancels superseded PDF.js canvas/text-layer tasks, avoids repainting an unchanged displayed request, and clears the main canvas on close. Document-load/close generations prevent stale asynchronous opens or renders from replacing a newer document; asynchronous fit/rotation/resize measurements also verify document, page, rotation and fit mode before updating scale.
+- The existing PDF.js/pdf-lib versions, UI layout, selection/copy, print preparation, forms, passwords/permissions, page tools, OCR, languages, and keyboard shortcuts were not removed or upgraded. The visual canvas is only downsampled when a page would exceed the explicit bitmap limits; the logical page and selectable text layer keep their normal geometry.
+
+### Measurement method and environment
+
+Run with `PHASE8_BENCH_TRIALS=3 npm run benchmark:phase8`. Every fixture runs in a fresh Node worker; each displayed value is the median of **three** workers. The harness records `performance.now()` timings, `process.cpuUsage()` operation CPU, and `process.memoryUsage().rss`; it uses PDF.js plus `@napi-rs/canvas`, `jsdom`, and `pdf-lib`, not the Electron/Chromium app. “Open” is PDF.js `getDocument().promise`; “first render” is a single bounded Node-canvas render; “all-page thumbnails” is a serial PDF.js raster pass; search timings cover a full-document query; print timing is `buildPrintPdf` preparation, not the OS print dialog/spooler. The 100-page and 100-page text-heavy PDFs are generated in the OS temporary directory and removed by the harness. `cambuz-demo.pdf` is the 10-page sample. Hindi, Punjabi, mixed-language, and scanned fixtures are repository samples.
+
+Machine: **Linux 6.1.158+ x64**, Node **v22.22.3**, Intel Xeon @ **2.60 GHz**, **2 logical CPUs**, host RAM **3,939.89 MiB**. The “idle RSS” snapshot is after imports and forced GC, immediately before opening a fixture; it is not application startup memory. “After first render” is sampled before the all-thumbnail pass. “After close” clears the search cache, destroys the PDF.js document, drops the input byte buffer/references, closes jsdom, runs GC, then samples process RSS. RSS can remain elevated or rise because Node/native allocators retain memory; it is not proof of a live PDF leak.
+
+### Baseline versus current probe
+
+The baseline is the previously recorded three-worker median before the Phase 8 cache/canvas/render edits; “current” is the final three-worker run above. All values are actual probe measurements, in milliseconds except PDF size and RSS (MiB). A pair is **baseline → current**. `n/a` means the harness did not run that operation.
+
+| Fixture (pages / PDF MiB) | Open ms | First render ms | Serial all-page thumbnails ms | First search ms | Repeat search ms | RSS after search MiB | Print prep ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| one-page (1 / 0.01) | 64.16 → 62.17 | 48.13 → 46.23 | 2.58 → 2.44 | 28.09 → 25.28 | 1.89 → 0.24 | 189.29 → 188.67 | n/a |
+| ten-page (10 / 0.01) | 66.04 → 64.11 | 31.32 → 30.00 | 46.35 → 46.30 | 48.16 → 43.65 | 21.67 → 0.27 | 191.17 → 190.13 | 47.72 → 60.95 |
+| hundred-page (100 / 0.03) | 70.97 → 73.89 | 23.79 → 27.00 | 145.22 → 141.59 | 83.62 → 84.71 | 45.80 → 0.74 | 209.88 → 207.44 | 207.42 → 203.81 |
+| large text-heavy (100 / 0.46) | 105.39 → 117.30 | 53.14 → 63.66 | 2,480.14 → 2,444.74 | 975.19 → 960.05 | 810.48 → 1.18 | 219.77 → 221.63 | n/a |
+| image-heavy scanned (4 / 0.32) | 64.97 → 66.19 | n/a → n/a | n/a → n/a | 27.92 → 27.41 | 1.90 → 0.33 | 196.92 → 197.94 | n/a |
+| Hindi (4 / 0.02) | 61.56 → 61.19 | 48.36 → 50.87 | 20.36 → 19.50 | 29.71 → 29.72 | 5.51 → 0.27 | 194.65 → 191.88 | n/a |
+| Punjabi (4 / 0.01) | 63.90 → 65.41 | 46.46 → 45.77 | 17.43 → 17.57 | 29.65 → 30.65 | 5.47 → 0.33 | 192.00 → 194.04 | n/a |
+| mixed-language (16 / 1.27) | 65.90 → 65.33 | 90.44 → 96.85 | 301.03 → 358.25 | 130.12 → 144.09 | 76.75 → 0.73 | 211.12 → 213.02 | n/a |
+
+The repeat-query improvement is the clear measured result: the current run makes **zero page-text extraction calls on the second query** (the baseline re-extracted text; on both 100-page cases it made 100 calls on each query). Repeat-query medians fell from 45.80 to 0.74 ms for the 100-page probe and 810.48 to 1.18 ms for the text-heavy probe. First-query, open, thumbnail, and print numbers move in both directions; these small fresh-process samples do not establish a causal regression or improvement for those unchanged subsystems. In particular, the observed large-text open/first-render and 10-page print deltas are retained above rather than described as wins. Native-app profiling is still needed before making claims about user-perceived startup or production memory.
+
+### Current process memory and operation CPU snapshots
+
+All values below are current three-worker medians. RSS is MiB. CPU is process CPU ms for the named operation; **idle CPU was not sampled**.
+
+| Fixture | RSS idle | After open | After first render | After search | Before close | After destroy + GC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| one-page | 175.06 | 180.50 | 183.13 | 188.67 | 188.27 | 188.80 |
+| ten-page | 176.01 | 181.48 | 184.25 | 190.13 | 195.89 | 195.89 |
+| hundred-page | 177.98 | 182.69 | 185.47 | 207.44 | 214.64 | 214.64 |
+| large text-heavy | 179.64 | 187.80 | 187.92 | 221.63 | 221.09 | 220.37 |
+| image-heavy scanned | 177.95 | 184.38 | n/a | 197.94 | 195.41 | 195.41 |
+| Hindi | 176.32 | 180.95 | 184.46 | 191.88 | 191.62 | 191.62 |
+| Punjabi | 178.18 | 183.01 | 187.05 | 194.04 | 193.61 | 193.61 |
+| mixed-language | 176.65 | 185.40 | 189.34 | 213.02 | 212.81 | 212.81 |
+
+| Fixture | Open CPU ms | Serial thumbnail CPU ms | First / repeat search CPU ms | Print prep CPU ms | Close CPU ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| one-page | 65.71 | 3.65 | 25.28 / 0.24 | n/a | 1.33 |
+| ten-page | 71.22 | 67.28 | 57.29 / 0.28 | 92.14 | 3.01 |
+| hundred-page | 87.82 | 199.57 | 122.84 / 0.75 | 335.70 | 1.75 |
+| large text-heavy | 161.13 | 2,634.22 | 1,122.14 / 1.19 | n/a | 1.77 |
+| image-heavy scanned | 68.76 | n/a | 28.09 / 0.36 | n/a | 1.62 |
+| Hindi | 66.70 | 32.35 | 29.74 / 0.28 | n/a | 1.51 |
+| Punjabi | 65.48 | 28.78 | 30.67 / 0.34 | n/a | 1.61 |
+| mixed-language | 72.55 | 503.22 | 215.38 / 0.74 | n/a | 2.48 |
+
+### Regression coverage and limits
+
+- `npm test` runs the full Phase 2–8 and sample/context-menu/text-selection/main-process suite. The new `test:phase8` checks extreme canvas dimensions, pixel/entry LRU accounting, stale-search invalidation, lazy thumbnail rendering, the scroll fallback, cancellation/cleanup in both thumbnail views, overlapping document loads (a delayed stale fetch cannot replace a newer committed PDF), and a real ten-page PDF through rapid navigation, repeated zoom, bounded viewer output, and close cleanup.
+- The existing suite continues to cover Unicode extraction/search and selection/copy for Hindi, Punjabi, mixed scripts and other Indian languages; print-PDF preparation; forms; password protection and permissions; page operations; OCR UI/input bounds; sample buttons; and context menus. OCR quality checks are skipped when Tesseract/language packs are absent.
+- **Not measured:** Electron/window startup to first visible page, native Chromium RSS/idle CPU, native packaged rendering, actual OS printing/spooling, and a reliable app-level long-session leak curve. The Node worker’s post-destroy RSS is only a proxy and does not prove memory returned to the OS.
+- The scanned fixture was opened/searched, but its raster timings are unavailable: the earlier Linux `@napi-rs/canvas` scanned-page raster worker segfaulted (exit 139), so the harness intentionally skips that render path. Do not interpret `n/a` as a zero-time render.
+- `node scripts/stage-app.mjs` succeeds and stages the current runtime tree at **21.4 MiB uncompressed**. This is not an ASAR or installer size. The last available CI figure is a **19.1 MiB app.asar baseline**; a comparable Phase 8 archive size is unavailable because the Electron binary is missing and its download failed TLS certificate verification. Native `electron-builder` builds and packaged-app smoke tests therefore remain unrun here. No dependency upgrade was made.
+
+Re-run the benchmark with `PHASE8_BENCH_TRIALS=3 npm run benchmark:phase8`; run the focused checks with `npm run test:phase8`; the benchmark has no timing pass/fail thresholds.
 
 ## Desktop packaging — Windows x64 build (Phase 9 groundwork)
 
@@ -17,8 +88,8 @@
 Packaging was audited before Phase 8. The work added electron-builder configuration,
 a staging script, a package contents checker, a runtime smoke test and a CI
 workflow. A follow-up fix changed runtime code for the sample buttons and for
-text selection (see *Sample buttons and text selection* below). Phase 8 has not
-started.
+text selection (see *Sample buttons and text selection* below). Phase 8 preserves
+that packaging setup; its benchmark/staging limitations are recorded below.
 
 | Target | Command | Output in `dist/` | Verified in CI (`Desktop builds`) |
 | --- | --- | --- | --- |
