@@ -1022,6 +1022,29 @@ async function main() {
     report.passed = report.checks.length > 0 && report.checks.every((check) => check.pass);
     fs.writeFileSync(path.join(outDir, 'smoke-test-result.json'), `${JSON.stringify(report, null, 2)}\n`);
     if (inCi) {
+      if (isWindows) {
+        const metricKeys = [
+          'native smoke environment',
+          'startup: process spawn to renderer-ready event',
+          'renderer navigation timing',
+          'Windows process-tree memory (settled welcome-screen idle)',
+          'open-to-first-page render (sample PDF)',
+          'Windows process-tree memory (after sample PDF first page rendered)',
+          'print preview preparation',
+          'packaged 100-page full-document search timings',
+          'Windows process-tree memory (after 100-page first and repeat searches)',
+          'three document lifecycle cycles',
+          'Windows process-tree memory (after three open-close cycles with document closed)',
+        ];
+        const measurements = metricKeys
+          .filter((key) => report.informational[key] !== undefined)
+          .map((key) => `${key}: ${report.informational[key]}`);
+        annotate(
+          'notice',
+          'Native runtime measurements',
+          `${report.app} (${report.platform}); single-run observations, not timing thresholds\n${measurements.join('\n')}`,
+        );
+      }
       const passedCount = report.checks.filter((check) => check.pass).length;
       const lines = [
         ...report.checks.map((check) => `${check.pass ? 'PASS' : 'FAIL'}  ${check.name}${check.detail ? ` — ${check.detail}` : ''}`),
