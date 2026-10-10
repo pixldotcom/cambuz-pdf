@@ -322,6 +322,33 @@ require(path.join(repoRoot, 'preload.js'));
   }
 }
 
+// Phase 10: macOS menu roles. Windows/Linux templates must be unchanged; the
+// macOS template must add an application menu with Quit and Edit copy/paste roles.
+{
+  const { applyMacMenuRoles } = require(path.join(repoRoot, 'src', 'mac-menu.cjs'));
+  const sample = [
+    { label: 'File', submenu: [{ label: 'Exit', accelerator: 'CmdOrCtrl+Q', click: () => {} }] },
+    { label: 'Edit', submenu: [{ label: 'Find in Document...', accelerator: 'CmdOrCtrl+F' }] },
+  ];
+  const same = applyMacMenuRoles(sample, 'win32', 'Cambuz PDF Reader');
+  assert(same === sample, 'non-macOS menu template is returned unchanged');
+  assert(applyMacMenuRoles(sample, 'linux', 'Cambuz PDF Reader') === sample, 'Linux menu template is returned unchanged');
+  const mac = applyMacMenuRoles(sample, 'darwin', 'Cambuz PDF Reader');
+  assert(mac[0].label === 'Cambuz PDF Reader', 'macOS gets an application menu named after the product');
+  assert(mac[0].submenu.some((item) => item.role === 'quit'), 'macOS application menu has a Quit item');
+  assert(mac[0].submenu.some((item) => item.role === 'hide'), 'macOS application menu has a Hide item');
+  const macFile = mac.find((item) => item.label === 'File');
+  const exit = macFile.submenu.find((item) => item.label === 'Exit');
+  assert(exit && exit.accelerator === undefined, 'macOS File > Exit does not duplicate the Cmd+Q accelerator');
+  const macEdit = mac.find((item) => item.label === 'Edit');
+  const roles = macEdit.submenu.map((item) => item.role).filter(Boolean);
+  for (const role of ['cut', 'copy', 'paste']) {
+    assert(roles.includes(role), `macOS Edit menu has the ${role} role`);
+  }
+  assert(macEdit.submenu.some((item) => item.label === 'Find in Document...'), 'macOS Edit menu keeps the custom Find item');
+  assert(sample[0].submenu[0].accelerator === 'CmdOrCtrl+Q', 'the source template is not mutated');
+}
+
 console.log('\n==============================');
 console.log(`Main process tests: ${passed} passed, ${failed} failed`);
 if (failed > 0) {

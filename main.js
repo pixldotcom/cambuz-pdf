@@ -6,6 +6,7 @@ const { getOcrStatus, recognizePng } = require('./src/ocr-engine.cjs');
 const { bundledSamplePath } = require('./src/bundled-samples.cjs');
 const { buildPageContextMenu } = require('./src/context-menu.cjs');
 const { pdfPathFromArgv } = require('./src/file-open.cjs');
+const { applyMacMenuRoles } = require('./src/mac-menu.cjs');
 
 let mainWindow;
 // A PDF named by the OS before the renderer could receive it (launch with a
@@ -257,7 +258,8 @@ function createWindow() {
     },
   ];
 
-  const menu = Menu.buildFromTemplate(template);
+  // macOS only: restore the application menu (Quit) and Edit copy/paste roles.
+  const menu = Menu.buildFromTemplate(applyMacMenuRoles(template, process.platform, 'Cambuz PDF Reader'));
   Menu.setApplicationMenu(menu);
 }
 
