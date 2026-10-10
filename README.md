@@ -2,7 +2,7 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 10 — Release quality and final readiness **PARTIAL** (see below). Phase 9 packaging is complete; Phase 8 performance results are preserved.<br>
+**Project status:** Phase 10 — Final Windows pre-release acceptance: **release candidate `ac2b848`, unsigned; manual acceptance pending** (see below). Linux and macOS are experimental. Phase 9 packaging is complete; Phase 8 performance results are preserved.<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
@@ -11,6 +11,102 @@
 ---
 
 ## Phase 10 — Release quality and final readiness
+
+### Final Windows pre-release acceptance (release candidate `ac2b848`)
+
+**Status: Windows x64 unsigned pre-release candidate. Automated acceptance passed; manual
+acceptance on real hardware is pending and gates release.** Linux and macOS builds are
+**experimental**. Nothing has been published or merged into `main`.
+
+| Item | Value |
+| --- | --- |
+| Branch | `arena/e73ef198-cambuz-pdf` (session branch; `main` remains `5578c73`) |
+| Release-candidate commit (builds the artifacts) | `ac2b848` |
+| Docs commits after the candidate | Release notes and acceptance checklist (docs only; `paths-ignore: **.md` means they do not rebuild the artifacts) |
+| CI run for the candidate | [Desktop builds, run 38032232208](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208): all four jobs succeeded, every step succeeded |
+| Pull request | None opened. Not published. |
+
+**Release decisions recorded (by the maintainer):**
+
+- App ID `com.cambuz.pdfreader`: **confirmed**; permanent once users install.
+- Publisher `Cambuz`: **confirmed**.
+- Signing: **unsigned pre-release accepted** (no certificate or notarization).
+- PDF copy restriction: **honour the document's copy-restriction flag**, enforced on every
+  surface (see below). This is a Cambuz-side policy, **not DRM**.
+- Electron 44 size and memory increase: **accepted**.
+
+**Windows evidence from the candidate (CI, packaged app on GitHub runners):**
+
+| Check | Unpacked | Installed (silent install, then uninstall) | Portable |
+| --- | --- | --- | --- |
+| Packaged checks passed | 35/35 | 35/35 | 35/35 |
+| Installer and uninstaller exit codes | — | 0 / 0 | — |
+| `ProductName`, `FileVersion` = 1.1.0, `CompanyName` on the installed exe | — | asserted in CI | — |
+| Start Menu shortcut and `.pdf` association added and removed | — | asserted in CI | — |
+| Zero uncaught renderer exceptions | yes | yes | yes |
+
+These checks cover launch with a PDF path, second-launch hand-off, both samples, drop-to-open,
+text-layer alignment, navigation, zoom, print-preview preparation (**no job sent to a printer**),
+selection and Ctrl+C, the Windows clipboard (including Hindi and Punjabi), copy refusal in a
+copy-restricted PDF, 100-page search, scanned page with no selectable text, and three
+open/render/close cycles.
+
+**Artifacts and SHA-256 checksums** (from the candidate run's "Write SHA-256 checksums" step):
+
+| File | Size | SHA-256 |
+| --- | ---: | --- |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-setup.exe` | 118.3 MiB | `7bd699b57cefc7cb76d46c239db89e02a4a3641fb4b6aa12ab49654b56c0e343` |
+| `Cambuz-PDF-Reader-1.1.0-win-x64-portable.exe` | 118.0 MiB | `3c100ecd868cc7711d8c4370f16de7c1d3d7ed20ee2f594db9880ba1b37ab45b` |
+
+Artifacts from run 38032232208 (retained 30 days): [`cambuz-pdf-windows-x64`](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662571692),
+[`smoke-test-evidence-windows-x64`](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662321981),
+[`cambuz-pdf-linux-x64`](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662201852),
+[`smoke-test-evidence-linux-x64`](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662216952),
+[`cambuz-pdf-macos-arm64`](https://github.com/pixldotcom/cambuz-pdf/actions/runs/38032232208/artifacts/11662616494).
+
+**Linux and macOS (experimental).** Linux AppImage: build passed, packaged smoke test passed 32/32
+under Xvfb with `--no-sandbox` (CI only). macOS arm64 DMG/ZIP: build and contents checks passed;
+the app was **never launched**. Neither has been launched by a person on a real desktop.
+Native Linux and macOS use is **not verified**.
+
+**Copy restriction, enforced on every surface (commit `ac2b848`).** Earlier builds enforced the
+flag only on the page text layer. Copy, Cut and drag-out are now refused document-wide while the
+document denies copying. That covers Ctrl+C, the context-menu Copy item, text in the bookmarks
+panel and text selected anywhere else in the window. Editable fields (the search box) stay usable,
+except when page text is also selected. Regression tests: `scripts/test-phase5.mjs` section G2
+(refused on body, text layer, bookmarks, drag and cut; allowed in the focused search box) and G4
+(unrestricted document still copies). Copy-restricted documents also keep OCR disabled.
+
+**Identity and version consistency (checked in this pass):**
+
+| Item | Value | Where it is set or checked |
+| --- | --- | --- |
+| Product name | Cambuz PDF Reader | `package.json`, `index.html` title, About dialog, Windows ProductName (CI asserts) |
+| Version | 1.1.0 | `package.json`; artifact names; About dialog now reads `app.getVersion()` (the hard-coded string is removed, covered by a test); CI now reads the expected FileVersion from `package.json` |
+| App ID | `com.cambuz.pdfreader` | `package.json` `build.appId` (confirmed) |
+| Publisher | Cambuz | `package.json` `author`; `LICENSE` copyright; Windows CompanyName (CI asserts non-empty) |
+| Licence | MIT | `LICENSE`, `THIRD-PARTY-NOTICES.md` (shipped in the installer) |
+| Icons | `.ico`, `.icns`, `.png` | `build/`; CI icon checks |
+
+**Still required before release (gating):**
+
+1. Manual Windows acceptance on real hardware using [`docs/WINDOWS-ACCEPTANCE-CHECKLIST.md`](docs/WINDOWS-ACCEPTANCE-CHECKLIST.md).
+2. A physical print test to a real printer (CI did not print).
+3. Your approval to publish, and your approval to merge `arena/e73ef198-cambuz-pdf` into `main`.
+
+Release notes: [`docs/RELEASE-NOTES-1.1.0.md`](docs/RELEASE-NOTES-1.1.0.md).
+
+**Open observations (not release blockers):** the first 100-page search measured 52–60 ms in one
+CI run and 77–83 ms in the candidate run, on the same runner CPU model; Phase 8 measured 52–54 ms.
+This needs a same-runner comparison. The context-menu Copy item stays enabled on restricted
+documents and shows the refusal message when chosen. Native Linux and macOS desktop checks remain
+open.
+
+**Superseded by the decisions above:** the "Manual actions required" list and the "Known limitations"
+item on copy restriction in the Phase 10 report below were written before these decisions. Their
+history is kept; the current position is the list above.
+
+### Phase 10 report (earlier, history preserved)
 
 **Phase 10 status: `PARTIAL`.** Automated regression and packaged-app checks pass on the
 release candidate in CI. Native desktop checks on Linux and macOS, physical printing,
@@ -161,12 +257,12 @@ footprint is not in scope for Phase 10 and is recorded as a follow-up.
 1. **Unsigned builds.** Windows SmartScreen will warn on the installer and portable executable. Gatekeeper will block the unsigned, un-notarized macOS app unless the user overrides it. See signing below.
 2. **Native desktop coverage is partial.** Linux was tested headless under Xvfb with `--no-sandbox`. macOS was never launched. Neither platform has been tested by a person on real hardware.
 3. **`--no-sandbox` in CI only.** The Linux smoke job needs it because the runner restricts user namespaces. The shipped app does not pass the flag. An AppImage on a hardened distribution may still need an AppArmor profile or the same flag. Not tested.
-4. **Copy restriction is a product decision.** A PDF whose permissions deny copying keeps its text non-selectable, and Cambuz says so. Whether to honour that flag is undecided.
+4. **Copy restriction (decided: honoured).** A PDF whose permissions deny copying keeps its text non-selectable and uncopyable in Cambuz, and Cambuz says so. This is a Cambuz-side policy, not DRM. Resolved in the final pre-release acceptance above.
 5. **Scanned pages need OCR.** They have no text layer. Optional OCR (Phase 7) needs the Tesseract engine and has not had its native desktop check.
 6. **Broken font mappings.** Some PDFs have missing or broken ToUnicode mappings. Copied text may be missing or wrong. Cambuz does not substitute characters. See the Phase 6 limitations.
 7. **macOS menu fix unverified.** Quit, Hide and Cmd+C on macOS are fixed in code and covered by unit assertions only.
 8. **Higher idle memory and installer size** on Electron 44, as measured above. No investigation yet.
-9. **The About dialog version is hard-coded** and must be kept in step with `package.json`.
+9. **About dialog version (resolved).** The About dialog now reads the app version at runtime.
 10. **Non-reproducible digests.** The AppImage, DMG and ZIP digests differ between builds with identical inputs. Verify a download against the `SHA256SUMS.txt` from its own run.
 11. **Historical blocker list.** The "Known limitations and blockers before a public release" list in the Desktop packaging section predates Phase 9. Several items were resolved in Phase 9; the list is kept for history.
 12. **Phase 6 device checks and the Phase 7 native OCR check** remain outstanding (see each phase).
