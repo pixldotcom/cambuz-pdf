@@ -38,8 +38,24 @@ const builtTemplates = [];
 const popups = [];
 const exposed = {};
 const invoked = [];
+const appListeners = new Map();
+const appQuitCalls = [];
+const externalUrls = [];
+const createdWindows = [];
+const FAKE_START_URL = 'file:///app/src/index.html';
 
+class FakeSession {
+  setPermissionRequestHandler(handler) {
+    this.requestHandler = handler;
+  }
+  setPermissionCheckHandler(handler) {
+    this.checkHandler = handler;
+  }
+}
 class FakeWebContents {
+  constructor() {
+    this.session = new FakeSession();
+  }
   on(event, listener) {
     webContentsListeners.set(event, listener);
     return this;
@@ -47,15 +63,37 @@ class FakeWebContents {
   send(channel, ...args) {
     sentToRenderer.push({ channel, args });
   }
+  setWindowOpenHandler(handler) {
+    this.windowOpenHandler = handler;
+  }
+  getURL() {
+    return FAKE_START_URL;
+  }
 }
 class FakeBrowserWindow {
   constructor(options) {
     this.options = options;
     this.webContents = new FakeWebContents();
+    this.focused = false;
+    this.minimized = false;
+    this.destroyed = false;
+    createdWindows.push(this);
   }
   loadFile() {}
   once() {}
   on() {}
+  isDestroyed() {
+    return this.destroyed;
+  }
+  isMinimized() {
+    return this.minimized;
+  }
+  restore() {
+    this.minimized = false;
+  }
+  focus() {
+    this.focused = true;
+  }
   static getAllWindows() {
     return [];
   }
@@ -64,8 +102,9 @@ class FakeBrowserWindow {
 const fakeElectron = {
   app: {
     whenReady: () => Promise.resolve(),
-    on: () => {},
-    quit: () => {},
+    on: (event, listener) => appListeners.set(event, listener),
+    quit: () => appQuitCalls.push(Date.now()),
+    requestSingleInstanceLock: () => true,
   },
   BrowserWindow: FakeBrowserWindow,
   ipcMain: {
@@ -83,6 +122,11 @@ const fakeElectron = {
     },
     setApplicationMenu: () => {},
   },
+  shell: {
+    openExternal: async (url) => {
+      externalUrls.push(url);
+    },
+  },
   contextBridge: {
     exposeInMainWorld: (name, api) => {
       exposed[name] = api;
@@ -93,7 +137,7 @@ const fakeElectron = {
       invoked.push({ channel, args });
       return Promise.resolve({ ok: true });
     },
-    on: () => {},
+    on: (channel, listener) => invoked.push({ channel, onListener: listener }),
   },
 };
 
@@ -160,6 +204,98 @@ console.log('\n## Main process: page context menu');
   assert(latest[0].enabled === false, 'with no selection Copy is disabled');
 }
 
+console.log('\n## Main process: window security guards');
+{
+  const window = createdWindows[0];
+  assert(window instanceof FakeBrowserWindow, 'the main window was created');
+  assert(window?.options?.webPreferences?.contextIsolation === true, 'context isolation stays enabled');
+  assert(window?.options?.webPreferences?.nodeIntegration === false, 'Node integration stays disabled');
+  assert(window?.options?.webPreferences?.webSecurity !== false, 'webSecurity is never disabled');
+
+  const openHandler = window?.webContents?.windowOpenHandler;
+  assert(typeof openHandler === 'function', 'a window-open handler is registered');
+  const https = openHandler({ url: 'https://example.com/doc#page=2' });
+  assert(https?.action === 'deny', 'remote links never open inside the app');
+  assert(externalUrls.includes('https://example.com/doc#page=2'), 'https links open in the system browser');
+  const before = externalUrls.length;
+  assert(openHandler({ url: 'file:///etc/passwd' })?.action === 'deny', 'file URLs are denied');
+  assert(openHandler({ url: 'javascript:alert(1)' })?.action === 'deny', 'javascript URLs are denied');
+  assert(externalUrls.length === before, 'only http(s) URLs reach the system browser');
+
+  let prevented = 0;
+  const willNavigate = webContentsListeners.get('will-navigate');
+  // Before the first load finishes, nothing is blocked: startup can never
+  // block itself.
+  willNavigate({ preventDefault: () => { prevented += 1; } }, 'file:///other/page.html');
+  assert(prevented === 0, 'navigation is not blocked before the first load');
+  webContentsListeners.get('did-finish-load')();
+  willNavigate({ preventDefault: () => { prevented += 1; } }, FAKE_START_URL);
+  assert(prevented === 0, 'the viewer page itself is allowed');
+  willNavigate({ preventDefault: () => { prevented += 1; } }, 'https://example.com/');
+  willNavigate({ preventDefault: () => { prevented += 1; } }, 'file:///etc/passwd');
+  assert(prevented === 2, 'navigation away from the viewer is blocked');
+
+  const session = window?.webContents?.session;
+  assert(typeof session?.requestHandler === 'function', 'a permission request handler is registered');
+  assert(typeof session?.checkHandler === 'function', 'a permission check handler is registered');
+  let granted = null;
+  session.requestHandler({}, 'camera', (value) => { granted = value; });
+  assert(granted === false, 'device permission requests are denied');
+  session.requestHandler({}, 'fullscreen', (value) => { granted = value; });
+  assert(granted === true, 'the reader keeps its Fullscreen API');
+  assert(session.checkHandler({}, 'microphone') === false, 'device permission checks are denied');
+  assert(session.checkHandler({}, 'fullscreen') === true, 'fullscreen permission checks pass');
+}
+
+console.log('\n## Main process: opening PDFs from the OS');
+{
+  const { isPdfPath, pdfPathFromArgv } = require(path.join(repoRoot, 'src', 'file-open.cjs'));
+  assert(isPdfPath('/tmp/Report.PDF') === true, 'PDF detection ignores extension case');
+  assert(isPdfPath('C:\\My Docs\\fichier-été.pdf') === true, 'paths with spaces and non-ASCII count as PDFs');
+  assert(isPdfPath('--remote-debugging-port=9331') === false, 'flags are not PDFs');
+  assert(isPdfPath('/tmp/notes.txt') === false, 'non-PDF files are not PDFs');
+  assert(isPdfPath('') === false && isPdfPath(null) === false, 'empty values are not PDFs');
+  assert(
+    pdfPathFromArgv(['/app/cambuz', '--remote-debugging-port=9331', '--no-sandbox', '/tmp/a.pdf', '/tmp/b.pdf']) === '/tmp/a.pdf',
+    'argv scan skips the executable and switches, takes the first PDF',
+  );
+  assert(pdfPathFromArgv(['/app/cambuz', '--', 'notes.pdf']) === 'notes.pdf', 'a bare -- separator is skipped');
+  assert(pdfPathFromArgv(['/app/cambuz']) === null, 'no PDF argument returns null');
+  assert(pdfPathFromArgv(null) === null, 'a missing argv returns null');
+
+  assert(appQuitCalls.length === 0, 'the first instance does not quit itself');
+  assert(typeof appListeners.get('second-instance') === 'function', 'second-instance is handled');
+  assert(typeof appListeners.get('open-file') === 'function', 'macOS open-file is handled');
+  assert(handlers.has('renderer-ready'), 'the renderer-ready handshake channel is registered');
+
+  const handshake = handlers.get('renderer-ready');
+  const secondInstance = appListeners.get('second-instance');
+  const openFile = appListeners.get('open-file');
+  const window = createdWindows[0];
+
+  // A file arriving before the renderer exists waits for the handshake.
+  let defaultPrevented = false;
+  const osPath = 'C:\\My Docs\\fichier-été.pdf';
+  openFile({ preventDefault: () => { defaultPrevented = true; } }, osPath);
+  assert(defaultPrevented, 'open-file takes over the event');
+  const collected = await handshake({});
+  assert(collected && collected.file === osPath, 'renderer-ready collects the pending OS file');
+  const collectedAgain = await handshake({});
+  assert(collectedAgain && collectedAgain.file === null, 'the pending file is consumed only once');
+
+  // Later arrivals are pushed straight to the renderer; the window is focused.
+  window.focused = false;
+  secondInstance({}, ['/app/cambuz', '--remote-debugging-port=9331', '/tmp/second doc.pdf']);
+  assert(window.focused === true, 'a second instance focuses the window');
+  const pushed = sentToRenderer.filter((message) => message.channel === 'open-file-path');
+  assert(pushed.length === 1 && pushed[0].args[0] === '/tmp/second doc.pdf', 'a second-instance PDF is pushed untouched');
+  secondInstance({}, ['/app/cambuz']);
+  assert(
+    sentToRenderer.filter((message) => message.channel === 'open-file-path').length === 1,
+    'a second instance without a PDF pushes nothing',
+  );
+}
+
 console.log('\n## Preload bridge');
 require(path.join(repoRoot, 'preload.js'));
 {
@@ -171,6 +307,19 @@ require(path.join(repoRoot, 'preload.js'));
     assert(call && call.channel === 'read-sample' && call.args[0] === 'cambuz-demo.pdf', 'readSample forwards the name to the read-sample channel');
   }
   assert(typeof api?.readFile === 'function', 'the preload bridge still exposes readFile');
+  assert(typeof api?.rendererReady === 'function', 'the preload bridge exposes rendererReady');
+  if (api && typeof api.rendererReady === 'function') {
+    await api.rendererReady();
+    const call = invoked[invoked.length - 1];
+    assert(call && call.channel === 'renderer-ready', 'rendererReady invokes the renderer-ready channel');
+  }
+  assert(typeof api?.onOpenFilePath === 'function', 'the preload bridge exposes onOpenFilePath');
+  if (api && typeof api.onOpenFilePath === 'function') {
+    const before = invoked.length;
+    api.onOpenFilePath(() => {});
+    const call = invoked[invoked.length - 1];
+    assert(invoked.length === before + 1 && call && call.channel === 'open-file-path', 'onOpenFilePath listens on open-file-path');
+  }
 }
 
 console.log('\n==============================');

@@ -2,11 +2,83 @@
 
 > **A lightweight, fast PDF reader focused on reading, searching, Indian-language support, and high-quality printing — without the bloat of large PDF suites.**
 
-**Project status:** Phase 8 — performance audit, bounded rendering/cache work, regression tests, Node benchmarks, and Windows packaged-Electron validation complete. The separate Node/PDF.js scanned-page raster probe still crashes; native printer output and long-session memory profiling remain outside the CI checks. See the Phase 8 limitations below.<br>
+**Project status:** Phase 9 — Packaging and Distribution **IN PROGRESS** (see below). Phase 8 performance work is complete and preserved.<br>
 **Product name:** Cambuz PDF Reader  
 **Primary target:** Windows desktop  
 **Repository:** GitHub  
 **Development approach:** Phase-by-phase, testable milestones
+
+---
+
+## Phase 9 — Packaging and Distribution
+
+**Phase 9 status: `IN PROGRESS — AUDIT RECORDED, FIXES NOT YET IMPLEMENTED`.**
+
+Starting commit: `a95c61a6ae1bce8148f807eae885d3755a7493cc` (branch `arena/f547264f-cambuz-pdf`).
+Final commit: TBD. Electron before: `28.3.3` (end-of-life). Electron after: TBD.
+
+> Branch note: the Phase 9 brief named branch `arena/98c3aa95-cambuz-pdf` at commit
+> `34b9796`, but this session is bound to `arena/f547264f-cambuz-pdf`. The checked-out
+> `HEAD` is `a95c61a`, the merge of PR #9 from `arena/98c3aa95-cambuz-pdf`, so all
+> Phase 8 work described below is present. All Phase 9 work stays on
+> `arena/f547264f-cambuz-pdf`; `main` is not merged.
+
+### Starting-state audit (verified 2026-10-10, before any Phase 9 change)
+
+Baseline regression suite on the starting commit: **978 passed, 0 failed, 2 skipped**
+(123 + 59 + 54 + 133 + 268 + 229 + 54 Phase 2–7; 19 samples; 12 context-menu;
+4 text-selection; 23 main-process; Phase 8 focused checks pass; the 2 skips are the
+Phase 7 no-Tesseract skips). Phase 8 packaged-Electron evidence is GitHub Actions run
+`38019417062` (32/32 Windows checks per packaging mode), as documented in Phase 8.
+
+Each pre-Phase-8 packaging-audit finding was re-verified against the current code:
+
+| Earlier finding | Verified starting state |
+| --- | --- |
+| “Try Sample PDF” / “Try Sample PDF Form” fail packaged (`ERR_FILE_NOT_FOUND`) | **Already fixed (Verified).** `main.js` serves bytes over the allow-listed `read-sample` IPC channel (`src/bundled-samples.cjs`); the browser preview uses a module-relative URL. Covered by `test-main-process.mjs` and the packaged smoke test. |
+| Text selection/copy broken | **Already fixed (Verified).** Selection, Ctrl+C, Windows clipboard, Hindi/Punjabi copy and the copy-denied refusal pass in packaged smoke tests. |
+| Electron 28.3.3 end-of-life | **Still open (Blocked for release).** `package.json` requires `electron ^28.0.0`, lockfile pins `28.3.3`. Latest stable on npm is `44.7.0`. Upgrade + full regression required. |
+| No application icon (`assets/icon.png` missing) | **Still open.** No `assets/` or `build/` directory exists; packaging silently uses Electron's default icon. |
+| No `LICENSE` file / third-party notices | **Still open.** `package.json` declares MIT but no license text ships; no notices file exists. |
+| No PDF file association / open-with handling | **Still open.** `main.js` reads no `process.argv`, has no `second-instance` / `open-file` handling; `package.json` has no `fileAssociations`. |
+| `express` in runtime `dependencies` | **Still open.** Only `server.js` (`npm run serve` preview) uses it, yet it ships in the desktop package. |
+| App ID `com.cambuz.pdfreader` / publisher unconfirmed | **Still open. Requires user action.** Permanent once users install. |
+| Unsigned builds (SmartScreen / Gatekeeper warnings) | **Still open. Requires user action.** No signing credentials; `CSC_IDENTITY_AUTO_DISCOVERY=false` in CI. |
+| macOS arm64-only, no mac app menu, never launched | **Still open.** Build-only in CI. |
+| Linux sandbox (`--no-sandbox` needed on CI runner) | **Still open.** Desktop AppImage behavior untested. |
+| Staging rewrites source `package.json` | **Already fixed (Verified).** `scripts/stage-app.mjs` packages `.build-app/`; source manifest untouched. |
+| `@napi-rs/canvas` native binding ships | **Already fixed (Verified).** Staging uses `--omit=optional` and fails if the scope is non-empty; the contents check forbids it. |
+| Non-reproducible digests | **Known.** AppImage digest changed between runs with identical inputs; verify against the run's own `SHA256SUMS.txt`. |
+
+Remaining Phase 9 blockers: Electron upgrade, icon set, `LICENSE` + third-party
+notices, OS file-open integration, runtime-dependency cleanup, CI distribution
+checks, and signing/platform documentation. The sections below are filled in as
+the work lands; until then, the Phase 8 text underneath remains the last fully
+validated state.
+
+### Electron upgrade
+
+TBD — target, breaking-change review, and regression results will be recorded here.
+
+### Distribution artifacts
+
+TBD — platform, architecture, format, size, SHA-256, and CI artifact links.
+
+### Validation
+
+TBD — build vs runtime results per platform.
+
+### Known limitations and signing status
+
+TBD — carried forward and newly discovered limits; signing/notarization state.
+
+### Manual tests still required
+
+TBD — precise procedures for what CI cannot validate.
+
+### Decisions or credentials required from the requester
+
+TBD — app ID/publisher confirmation, signing credentials, native-device tests.
 
 ---
 

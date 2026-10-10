@@ -1,12 +1,19 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { getOcrStatus, recognizePng } = require('./src/ocr-engine.cjs');
 const { bundledSamplePath } = require('./src/bundled-samples.cjs');
 const { buildPageContextMenu } = require('./src/context-menu.cjs');
+const { pdfPathFromArgv } = require('./src/file-open.cjs');
 
 let mainWindow;
+// A PDF named by the OS before the renderer could receive it (launch with a
+// file path, macOS open-file before ready). The renderer collects it through
+// the `renderer-ready` handshake; later arrivals are pushed over
+// `open-file-path`. Cambuz shows one document, so the newest pending file wins.
+let pendingOsFile = null;
+let rendererIsReady = false;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -57,6 +64,38 @@ function createWindow() {
     });
     Menu.buildFromTemplate(template).popup({ window: mainWindow });
   });
+
+  // Hardening for a local-only reader (Phase 9). Security posture is unchanged
+  // otherwise: context isolation stays on, Node integration stays off, and
+  // webSecurity is never disabled.
+  //
+  // - Outline/bookmark URLs and any other window.open() target leave the app:
+  //   http(s) links open in the system browser; nothing else opens anywhere.
+  // - The viewer never navigates after its initial load, so page-initiated
+  //   navigation away from it is blocked. The expected URL is captured after
+  //   the first successful load, so startup itself can never be blocked.
+  // - The app requests no device or system permissions; all are denied except
+  //   the Fullscreen API the reader itself uses (F11 / fullscreen button).
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      shell.openExternal(url).catch(() => {});
+    }
+    return { action: 'deny' };
+  });
+  let startPageUrl = null;
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (!startPageUrl && mainWindow && !mainWindow.isDestroyed()) {
+      startPageUrl = mainWindow.webContents.getURL();
+    }
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (startPageUrl && url !== startPageUrl) event.preventDefault();
+  });
+  const ALLOWED_PERMISSIONS = new Set(['fullscreen']);
+  mainWindow.webContents.session.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(ALLOWED_PERMISSIONS.has(permission));
+  });
+  mainWindow.webContents.session.setPermissionCheckHandler((_contents, permission) => ALLOWED_PERMISSIONS.has(permission));
 
   // Build menu
   const template = [
@@ -306,6 +345,12 @@ ipcMain.handle('dialog-open-pdfs', async () => {
 });
 
 // Return only printer fields needed by the settings UI.
+//
+// Electron 36 removed PrinterInfo.isDefault (and status) upstream, and there is
+// no replacement API for the default printer. The field stays in this payload
+// so the preload contract is unchanged; it is simply always false on current
+// runtimes, and the renderer then falls back to its "Choose in system print
+// dialog…" choice, which still reaches the OS default through the native dialog.
 ipcMain.handle('list-printers', async (event) => {
   try {
     const printers = await event.sender.getPrintersAsync();
@@ -408,6 +453,9 @@ ipcMain.handle('print-pdf', async (_event, rawBytes, rawOptions = {}) => {
         sandbox: true,
       },
     });
+    // The print window is transient and hidden in silent mode; links inside
+    // the printed document must not spawn windows anywhere.
+    printWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
     await printWindow.loadFile(pdfPath);
     // Allow Chromium's built-in PDF viewer to finish initializing before the
@@ -609,7 +657,66 @@ ipcMain.handle('save-pdf-files', async (_event, rawFiles, rawOptions = {}) => {
   }
 });
 
-app.whenReady().then(createWindow);
+// ---------------------------------------------------------------------------
+// Phase 9: opening PDFs from the operating system.
+//
+// Double-click, "Open with Cambuz", and launching with a file path all end up
+// here: Windows/Linux deliver the path as a command-line argument (at startup
+// or through `second-instance`), macOS through the `open-file` event. The path
+// is passed to the renderer over `open-file-path` (or returned from the
+// `renderer-ready` handshake when it arrives before the renderer exists) and
+// read through the same sandboxed `read-file` channel as the Open dialog, so
+// paths with spaces or non-ASCII characters need no special handling and a
+// missing file surfaces the same clear in-app error.
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+}
+
+function deliverOsFile(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return;
+  if (rendererIsReady && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('open-file-path', filePath);
+  } else {
+    pendingOsFile = filePath;
+  }
+}
+
+// The renderer calls this once it has registered its `open-file-path`
+// listener. Any file that arrived earlier is returned so the renderer can
+// open it instead of its default startup document.
+ipcMain.handle('renderer-ready', () => {
+  rendererIsReady = true;
+  const file = pendingOsFile;
+  pendingOsFile = null;
+  return { file };
+});
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  // A second launch while Cambuz runs: focus the window and open its PDF.
+  app.on('second-instance', (_event, argv) => {
+    focusMainWindow();
+    deliverOsFile(pdfPathFromArgv(argv));
+  });
+}
+
+app.on('open-file', (event, filePath) => {
+  // macOS: may arrive before the app is ready, in which case the file waits
+  // in pendingOsFile until the `renderer-ready` handshake collects it.
+  event.preventDefault();
+  deliverOsFile(filePath);
+});
+
+app.whenReady().then(() => {
+  const startupPdf = pdfPathFromArgv(process.argv);
+  if (startupPdf) pendingOsFile = startupPdf;
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   app.quit();
