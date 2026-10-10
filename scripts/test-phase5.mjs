@@ -811,6 +811,12 @@ function canvasStub(canvas) {
 }
 
 /** Boot the real app with `?pdf=<url>` and hand the DOM to `body`. */
+function copyFromG4(node, win) {
+  const event = new win.Event('copy', { bubbles: true, cancelable: true });
+  node.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
 async function withApp(pdfUrl, body) {
   const dom = new JSDOM(html, {
     url: `http://localhost:3000/src/index.html?pdf=${encodeURIComponent(pdfUrl)}`,
@@ -909,6 +915,36 @@ await withApp('/scripts/fixtures/secure-permissions-only.pdf', async ({ window: 
   await settle(200);
   assert(/does not allow copying/.test(app('status-text').textContent), 'G2: select-all refuses to hand the text over');
 
+  // Phase 10: the refusal covers every surface, not just the page text layer.
+  const copyFrom = (node) => {
+    const event = new win.Event('copy', { bubbles: true, cancelable: true });
+    node.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  assert(copyFrom(document.body), 'G2: copy with focus on the page body is refused');
+  assert(copyFrom(app('text-layer')), 'G2: copy from the page text layer is refused');
+  assert(copyFrom(app('outline-panel')), 'G2: copy from the bookmarks panel is refused');
+  const drag = new win.Event('dragstart', { bubbles: true, cancelable: true });
+  app('text-layer').dispatchEvent(drag);
+  assert(drag.defaultPrevented, 'G2: dragging text out of the page is refused');
+  const cut = new win.Event('cut', { bubbles: true, cancelable: true });
+  document.body.dispatchEvent(cut);
+  assert(cut.defaultPrevented, 'G2: cut is refused on a read-only document');
+  // The search box is editable: copying the query is allowed while no page text is selected.
+  // Open the search bar the way a user does (Ctrl+F), which focuses its input.
+  document.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }));
+  await settle(100);
+  assert(win.document.activeElement === app('search-input'), 'G2: Ctrl+F focuses the search box');
+  assert(!copyFrom(app('search-input')), 'G2: copying from the focused search box is allowed');
+  // Page text selected while the search box has focus: the page text is still refused.
+  const selectionRange = win.document.createRange();
+  selectionRange.selectNodeContents(app('text-layer'));
+  win.getSelection().removeAllRanges();
+  win.getSelection().addRange(selectionRange);
+  assert(copyFrom(app('search-input')), 'G2: page text selected with the search box focused is still refused');
+  win.getSelection().removeAllRanges();
+  app('search-input').blur();
+
   // The security dialog reports the same restrictions.
   click('btn-security', win);
   await settle(200);
@@ -946,6 +982,8 @@ await withApp('/samples/form-sample.pdf', async ({ window: win, settle, download
   assert(app('btn-forms').disabled === false, 'G4: form filling is available for an unprotected PDF');
   assert(app('btn-print').disabled === false, 'G4: printing is available');
   assert(!app('text-layer').classList.contains('no-copy'), 'G4: copying is allowed');
+  assert(!copyFromG4(document.body, win), 'G4: copy from the page body is allowed');
+  assert(!copyFromG4(app('outline-panel'), win), 'G4: copy from the bookmarks panel is allowed');
 
   document.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
   await settle(1200);

@@ -43,6 +43,9 @@ const appQuitCalls = [];
 const externalUrls = [];
 const createdWindows = [];
 const FAKE_START_URL = 'file:///app/src/index.html';
+// A value that cannot be confused with the real version: proves About reads app.getVersion().
+const APP_VERSION_UNDER_TEST = '9.8.7-about-test';
+const messageBoxes = [];
 
 class FakeSession {
   setPermissionRequestHandler(handler) {
@@ -104,6 +107,7 @@ const fakeElectron = {
     whenReady: () => Promise.resolve(),
     on: (event, listener) => appListeners.set(event, listener),
     quit: () => appQuitCalls.push(Date.now()),
+    getVersion: () => APP_VERSION_UNDER_TEST,
     requestSingleInstanceLock: () => true,
   },
   BrowserWindow: FakeBrowserWindow,
@@ -112,7 +116,10 @@ const fakeElectron = {
   },
   dialog: {
     showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
-    showMessageBox: async () => ({ response: 0 }),
+    showMessageBox: async (...args) => {
+      messageBoxes.push(args);
+      return { response: 0 };
+    },
     showMessageBoxSync: () => 1,
   },
   Menu: {
@@ -321,6 +328,21 @@ require(path.join(repoRoot, 'preload.js'));
     const call = invoked[invoked.length - 1];
     assert(invoked.length === before + 1 && call && call.channel === 'open-file-path', 'onOpenFilePath listens on open-file-path');
   }
+}
+
+// Phase 10: the About dialog reports the running app version, not a literal.
+{
+  const helpMenu = builtTemplates.flat().find((item) => item && item.label === 'Help');
+  const about = helpMenu && helpMenu.submenu.find((item) => item.label === 'About Cambuz PDF Reader');
+  assert(typeof about?.click === 'function', 'the Help menu has an About item');
+  if (about && typeof about.click === 'function') {
+    about.click();
+    const box = messageBoxes[messageBoxes.length - 1];
+    const message = box && box[1] && box[1].message;
+    assert(message === `Cambuz PDF Reader v${APP_VERSION_UNDER_TEST}`, 'About shows the app version from app.getVersion()', message);
+  }
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version;
+  assert(APP_VERSION_UNDER_TEST !== pkgVersion, 'About version is not a hard-coded package version');
 }
 
 // Phase 10: macOS menu roles. Windows/Linux templates must be unchanged; the

@@ -251,7 +251,7 @@ function createWindow() {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'About Cambuz PDF Reader',
-              message: 'Cambuz PDF Reader v1.1.0',
+              message: `Cambuz PDF Reader v${app.getVersion()}`,
               detail: 'A lightweight, fast PDF reader.\nRead. Search. Print. Done.',
             });
           },
