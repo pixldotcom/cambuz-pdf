@@ -180,13 +180,18 @@ jobs:
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
-      - name: Verify desktop entry and icon wiring
+      - name: Verify desktop entry, icons and mime wiring inside the AppImage
         run: |
-          ls dist/linux-unpacked/
-          desktop=$(ls dist/linux-unpacked/*.desktop | head -n 1)
-          echo "Desktop entry: $desktop"
-          grep -H '^Icon=' "$desktop"
-          grep -H 'MimeType=.*application/pdf' "$desktop"
+          cd dist
+          appimage=$(ls *.AppImage | head -n 1)
+          ./"$appimage" --appimage-extract 'cambuz-pdf-reader.desktop' >/dev/null
+          ./"$appimage" --appimage-extract 'usr/share/icons/hicolor/*/apps/cambuz-pdf-reader.png' >/dev/null
+          ./"$appimage" --appimage-extract 'usr/share/mime/packages/cambuz-pdf-reader.xml' >/dev/null
+          grep -H '^Icon=cambuz-pdf-reader$' squashfs-root/cambuz-pdf-reader.desktop
+          grep -H 'MimeType=.*application/pdf' squashfs-root/cambuz-pdf-reader.desktop
+          test -n "$(find squashfs-root/usr/share/icons -name 'cambuz-pdf-reader.png' | head -n 1)"
+          grep -H 'mime-type type="application/pdf"' squashfs-root/usr/share/mime/packages/cambuz-pdf-reader.xml
+          grep -H 'glob pattern="\*.pdf"' squashfs-root/usr/share/mime/packages/cambuz-pdf-reader.xml
       - name: Install virtual display
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Prepare OS file-open probe PDFs
