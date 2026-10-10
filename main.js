@@ -464,6 +464,12 @@ ipcMain.handle('print-pdf', async (_event, rawBytes, rawOptions = {}) => {
     if (!Number.isInteger(copies) || copies < 1 || copies > 99) {
       throw new Error('Copies must be a whole number from 1 to 99.');
     }
+    const duplexMode = options.duplexMode ?? 'simplex';
+    if (!['simplex', 'longEdge', 'shortEdge'].includes(duplexMode)) {
+      throw new Error('Unsupported two-sided printing mode.');
+    }
+    const collate = options.collate ?? true;
+    if (typeof collate !== 'boolean') throw new Error('Collate must be on or off.');
     const pageSize = getNativePaperSize(options);
     const printerName = typeof options.deviceName === 'string' ? options.deviceName.trim() : '';
 
@@ -485,6 +491,7 @@ ipcMain.handle('print-pdf', async (_event, rawBytes, rawOptions = {}) => {
       show: !printerName, // native system dialog must have a visible owner
       autoHideMenuBar: true,
       backgroundColor: '#ffffff',
+      icon: path.join(__dirname, 'assets', 'icon.png'),
       webPreferences: {
         plugins: true,
         contextIsolation: true,
@@ -507,7 +514,8 @@ ipcMain.handle('print-pdf', async (_event, rawBytes, rawOptions = {}) => {
       color: true,
       landscape: options.orientation === 'landscape', // matches the prepared sheet's MediaBox
       copies,
-      collate: true,
+      collate,
+      duplexMode,
       deviceName: printerName || undefined,
       pageSize,
       pagesPerSheet: 1, // N-up has already been composed in the prepared PDF

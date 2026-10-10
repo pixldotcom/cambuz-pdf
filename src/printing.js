@@ -23,6 +23,8 @@ export const PRINT_DEFAULTS = Object.freeze({
   pageMode: 'all',
   pageRange: '',
   copies: 1,
+  collate: true,
+  duplexMode: 'simplex',
   paperSize: 'A4',
   orientation: 'portrait',
   scaling: 'fit',
@@ -36,6 +38,7 @@ export const PRINT_DEFAULTS = Object.freeze({
 const MM_TO_PT = 72 / 25.4;
 const VALID_PAGE_MODES = new Set(['current', 'all', 'range']);
 const VALID_ORIENTATIONS = new Set(['portrait', 'landscape']);
+const VALID_DUPLEX_MODES = new Set(['simplex', 'longEdge', 'shortEdge']);
 const VALID_SCALING = new Set(['fit', 'actual', 'custom']);
 const VALID_MARGIN_MODES = new Set(['none', 'narrow', 'normal', 'wide', 'custom']);
 const VALID_PAGES_PER_SHEET = new Set([1, 2, 4]);
@@ -122,6 +125,12 @@ export function normalizePrintSettings(input = {}) {
   }
   if (!VALID_ORIENTATIONS.has(settings.orientation)) {
     throw new Error('Choose portrait or landscape orientation.');
+  }
+  if (!VALID_DUPLEX_MODES.has(settings.duplexMode)) {
+    throw new Error('Choose one-sided, two-sided long-edge, or two-sided short-edge printing.');
+  }
+  if (typeof settings.collate !== 'boolean') {
+    throw new Error('Collate must be on or off.');
   }
   if (!VALID_SCALING.has(settings.scaling)) {
     throw new Error('Choose fit to page, actual size, or custom scale.');

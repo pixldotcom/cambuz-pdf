@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/rajeshkamboj/cambuz-pdf/raw/main/assets/icon.png" alt="Cambuz PDF Reader logo" width="96" height="96" />
+  <img src="assets/icon-master.png" alt="Cambuz PDF Reader icon" width="96" height="96" />
 </p>
 
 <h1 align="center">Cambuz PDF Reader</h1>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/pixldotcom/cambuz-pdf/actions/workflows/desktop-build.yml"><img src="https://github.com/pixldotcom/cambuz-pdf/actions/workflows/desktop-build.yml/badge.svg?branch=main" alt="Desktop builds status (main)" /></a>
+  <a href="https://github.com/rajeshkamboj/cambuz-pdf/actions/workflows/desktop-build.yml"><img src="https://github.com/rajeshkamboj/cambuz-pdf/actions/workflows/desktop-build.yml/badge.svg?branch=main" alt="Desktop builds status (main)" /></a>
   <img src="https://img.shields.io/badge/version-1.1.0--pre--release-informational" alt="Version 1.1.0 pre-release" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/Windows%20x64-primary-0078D6" alt="Windows x64 (primary target)" />
@@ -54,7 +54,7 @@ are **unsigned** builds — expect SmartScreen/Gatekeeper notices.
 Newer or expired links? Every push to `main` that changes application or packaging
 files rebuilds all three platforms (documentation-only commits are skipped):
 find the latest green run on the
-[Desktop builds workflow page](https://github.com/pixldotcom/cambuz-pdf/actions/workflows/desktop-build.yml).
+[Desktop builds workflow page](https://github.com/rajeshkamboj/cambuz-pdf/actions/workflows/desktop-build.yml).
 
 <details>
 <summary><strong>SHA-256 checksums for this build</strong> (published by the CI run itself)</summary>
@@ -116,11 +116,17 @@ exercised on GitHub runners against the *packaged* app — see
   so the preview is what you get: page selection with validated ranges, 1–99 copies,
   portrait/landscape, A4/A3/A5/Letter/Legal/Tabloid, five margin presets plus custom
   (0–50 mm), fit/actual/custom scaling, and 2-up / 4-up sheets.
+- Choose one-sided or two-sided printing (flip on the long or short edge), plus
+  collated or uncollated copies. Direct printing sends these choices to Electron's
+  native print API; duplex requires a duplex-capable printer. In the system print
+  dialog, verify the driver's two-sided and collation settings before confirming.
 - Ink Saver preset: grayscale raster output (capped at 200 dpi) to save toner.
 - On Windows, Cambuz lists system printers via Electron and can fall back to the native
-  print dialog; the print preview and job preparation were verified in CI. **No physical
-  printer output has been tested yet** — CI never sent a job to a printer.
-- The composed print PDF can also be downloaded for testing elsewhere.
+  print dialog. Browser mode cannot set printer options: choose duplex, copies and
+  collation in the browser/system dialog. The downloadable print-ready PDF contains
+  the page selection and layout, **not** printer-only settings such as duplex/copies.
+  Print preview, job preparation and native-option forwarding are covered by tests;
+  **no physical printer output has been tested yet** — CI never sent a job to a printer.
 
 ### ✂️ Page tools
 
@@ -235,7 +241,7 @@ Honest status of the current build — details and evidence in
 | Text extraction fidelity | Some PDFs ship missing or broken ToUnicode mappings or `/ActualText`; text copied from those files may be wrong or empty. Cambuz renders and searches what the file encodes and never substitutes characters. |
 | Scanned PDFs | Render as images only. Selectable/searchable text requires the optional local Tesseract OCR (not bundled). |
 | Copy-restricted PDFs | If the document's permissions deny copying, Cambuz **honours it** app-wide (no selection, Ctrl+C, cut or drag-out; OCR disabled) and says so — while search still works. This is a Cambuz-side courtesy, **not DRM**: other software may ignore the same flags. |
-| Printing | Preview and job preparation are CI-verified; **physical printer output is untested** and per-printer non-printable margins are not queried (edge clipping possible with `None` margins). Filled form values do not appear in print — save the filled copy and print that. |
+| Printing | Preview, job preparation and native duplex/collation option forwarding are tested; **physical printer output is untested**. Printer capabilities and per-printer non-printable margins are not queried (duplex may be unavailable; edge clipping possible with `None` margins). System dialogs/drivers may override settings. Filled form values do not appear in print — save the filled copy and print that. |
 | Search | Substring, case-insensitive, NFC-normalized; no regex, whole-word or diacritic-insensitive modes. |
 | Forms | AcroForm basics only: XFA/dynamic forms, signature fields and JavaScript-driven fields are shown read-only, never guessed. |
 | Size & memory | Installers are 118–130 MiB, mostly the Electron 44 runtime (the Cambuz payload is 17.7 MiB); idle memory measured roughly 150–165 MiB across CI runs on the Windows runner. Accepted trade-offs vs. an end-of-life runtime, still open to optimization. |
@@ -258,7 +264,7 @@ Honest status of the current build — details and evidence in
   or hostile PDFs remain a risk surface of any PDF reader — open files you trust.
 - Licence: **MIT** ([LICENSE](LICENSE)), with bundled components listed in
   [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) (Electron, PDF.js, pdf-lib and friends).
-- **Bugs, crashes, feature requests:** [open an issue](https://github.com/pixldotcom/cambuz-pdf/issues)
+- **Bugs, crashes, feature requests:** [open an issue](https://github.com/rajeshkamboj/cambuz-pdf/issues)
   — include the version from Help → About, your OS, and steps. This repository's issues are
   the only official support channel.
 
@@ -309,7 +315,7 @@ basic metadata, all on a working copy. Filling and saving forms works too. There
 content editing, annotation authoring or XFA/signature support.
 
 **Where do I report a bug?**
-[GitHub issues](https://github.com/pixldotcom/cambuz-pdf/issues). Download problems? State
+[GitHub issues](https://github.com/rajeshkamboj/cambuz-pdf/issues). Download problems? State
 which CI run you used and whether the checksums matched.
 
 ## 🛠 For developers
@@ -342,9 +348,9 @@ Cambuz PDF Reader is released under the [MIT License](LICENSE) — Copyright © 
 with bundled third-party components listed with full license texts in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-- Source code: [github.com/pixldotcom/cambuz-pdf](https://github.com/pixldotcom/cambuz-pdf)
-- Bug reports and feature requests: [GitHub issues](https://github.com/pixldotcom/cambuz-pdf/issues)
-- Automated builds: [Desktop builds workflow](https://github.com/pixldotcom/cambuz-pdf/actions/workflows/desktop-build.yml)
+- Source code: [github.com/rajeshkamboj/cambuz-pdf](https://github.com/rajeshkamboj/cambuz-pdf)
+- Bug reports and feature requests: [GitHub issues](https://github.com/rajeshkamboj/cambuz-pdf/issues)
+- Automated builds: [Desktop builds workflow](https://github.com/rajeshkamboj/cambuz-pdf/actions/workflows/desktop-build.yml)
 - Developer documentation: [DEVELOPMENT.md](DEVELOPMENT.md) ·
   [1.1.0 pre-release notes](docs/RELEASE-NOTES-1.1.0.md) ·
   [Windows acceptance checklist](docs/WINDOWS-ACCEPTANCE-CHECKLIST.md)

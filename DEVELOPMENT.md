@@ -26,10 +26,11 @@ the README only: no PDF rendering or other application behavior was changed.
 
 ### Icon assets (official identity)
 
-- **Master asset.** `assets/icon-master.png` (1254×1254 RGB PNG, fully opaque — the
-  artwork is a full-bleed tile with its own dark background, so there is no alpha to
-  preserve) is the official Cambuz icon and the single source of truth. It is kept
+- **Master asset.** `assets/icon-master.png` (1254×1254 RGBA PNG, transparent
+  corners) is the official Cambuz icon and the single source of truth. It is kept
   byte-for-byte as supplied; it is never redrawn, recoloured or substituted.
+  Regenerate the shipped derivatives with `python3 scripts/generate-icon-assets.py`
+  (requires Pillow); keep transparency in every output.
 - **Derivation.** `scripts/generate-icon-assets.py` (Python 3 + Pillow) only rescales
   the master, with no cropping or shape changes:
   - `assets/icon.png` — 512×512, runtime window/taskbar icon, README logo, About dialog.

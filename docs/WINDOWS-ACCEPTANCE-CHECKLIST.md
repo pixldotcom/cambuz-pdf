@@ -39,6 +39,9 @@ from commit `ac2b848` (or the commit named in the release notes). Check SHA-256 
 | 26 | Portable exe runs from a folder on a USB drive or desktop without installing. | | |
 | 27 | Uninstall from Apps & features: program removed, Start Menu entry gone, `.pdf` association removed. | | |
 | 28 | Optional: with Tesseract installed, a scanned page can be recognised with OCR; without it, the app says so. | | |
+| 29 | On a duplex-capable printer, print a multi-sheet document one-sided, then long-edge and short-edge duplex; verify page order and flip direction (also try 2-up and landscape). Test both a named printer and the system dialog; record any driver overrides. | | |
+| 30 | Print two copies collated and uncollated; verify physical output order. On a simplex-only printer, verify that requesting duplex does not silently promise two-sided output. | | |
+| 31 | Confirm the transparent icon appears on the installer, installed/portable exe, Start Menu, taskbar, About dialog and the native print window; inspect small icon sizes on both light and dark backgrounds. | | |
 
 **Not part of this checklist:** macOS and Linux. Those builds are experimental and need their own
 testing on real hardware before they can be called supported.
