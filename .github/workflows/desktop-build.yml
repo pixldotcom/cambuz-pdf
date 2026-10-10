@@ -109,6 +109,12 @@ jobs:
           if ($install.ExitCode -ne 0) { throw "Installer exited with code $($install.ExitCode)" }
           $exe = Join-Path $target 'Cambuz PDF Reader.exe'
           if (-not (Test-Path $exe)) { throw "Installed executable not found: $exe" }
+          # Application name, publisher and version stamped on the executable.
+          $versionInfo = (Get-Item $exe).VersionInfo
+          Write-Host "ProductName=$($versionInfo.ProductName) FileVersion=$($versionInfo.FileVersion) CompanyName=$($versionInfo.CompanyName) LegalCopyright=$($versionInfo.LegalCopyright)"
+          if ($versionInfo.ProductName -ne 'Cambuz PDF Reader') { throw "Unexpected ProductName: $($versionInfo.ProductName)" }
+          if ($versionInfo.FileVersion -notlike '1.1.0*') { throw "Unexpected FileVersion: $($versionInfo.FileVersion)" }
+          if ([string]::IsNullOrWhiteSpace($versionInfo.CompanyName)) { throw 'CompanyName (publisher) is empty on the installed executable' }
           # Start Menu shortcut (per-user install) and .pdf file association.
           $startMenuLink = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Cambuz PDF Reader.lnk'
           if (-not (Test-Path $startMenuLink)) { throw "Start Menu shortcut not found: $startMenuLink" }
